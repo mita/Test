@@ -2,6 +2,7 @@
 #define _LARGEFILE64_SOURCE
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -13,6 +14,24 @@
 
 #define DEFAULT_TMP_DIR "/tmp"
 #define BIGMALLOC_TMP_TEMPLATE "bigmalloc-XXXXXX"
+
+static void die(const char *err, ...)
+{
+	va_list params;
+
+	va_start(params, err);
+	verr(EXIT_FAILURE, err, params);
+	va_end(params);
+}
+
+static void diex(const char *err, ...)
+{
+	va_list params;
+
+	va_start(params, err);
+	verrx(EXIT_FAILURE, err, params);
+	va_end(params);
+}
 
 static const char *bigmalloc_tmp_dir(void)
 {
@@ -27,7 +46,6 @@ static const char *bigmalloc_tmp_dir(void)
 
 static int mkostemp(char *template, int flags)
 {
-
 	mktemp(template);
 	return open(template, O_CREAT | O_EXCL | O_RDWR | flags);
 }
@@ -42,8 +60,10 @@ static int mktempfd(void)
 
 	ret = asprintf(&tmpfile, "%s/%s",
 			bigmalloc_tmp_dir(), BIGMALLOC_TMP_TEMPLATE);
-	if (ret < 0)
+	if (ret < 0) {
+		errno = ENOMEM;
 		return -1;
+	}
 
 	while (1) {
 		fd = mkostemp(tmpfile, O_LARGEFILE);
@@ -51,7 +71,7 @@ static int mktempfd(void)
 			break;
 
 		if (errno != EEXIST)
-			err(EXIT_FAILURE, "bigmalloc: mkostemp(%s/%s)",
+			die("bigmalloc: mkostemp(%s/%s)",
 				bigmalloc_tmp_dir(), BIGMALLOC_TMP_TEMPLATE);
 
 		sprintf(tmpfile, "%s/%s",
@@ -72,7 +92,7 @@ struct bigmalloc_chunk {
 };
 
 #define BIGMALLOC_HEADER_SIZE ((sizeof(struct bigmalloc_chunk) + 15) & ~15)
-#define BIGMALLOC_MAGIC (0xb19)
+#define BIGMALLOC_MAGIC 0xb193a00c
 
 static inline void *bigmalloc_chunk_to_mem(struct bigmalloc_chunk *chunk)
 {
@@ -90,17 +110,18 @@ static int stretch_file(int fd, size_t size)
 	ssize_t count;
 
 	offset = lseek64(fd, size, SEEK_SET);
-	if (offset != size) {
-		warn("bigmalloc: lseek64(%d, %zu, SEEK_SET) = %lld",
-			fd, size, (long long)offset);
+	if (offset < 0)
 		return -1;
+	if (offset != size) {
+		diex("bigmalloc: lseek64(%d, %zu, SEEK_SET) = %lld",
+			fd, size, (long long)offset);
 	}
 
 	count = write(fd, "", 1);
-	if (count != 1) {
-		warn("bigmalloc: write(%d, \"\", 1) = %zu", fd, count);
+	if (count < 0)
 		return -1;
-	}
+	if (count != 1)
+		diex("bigmalloc: write(%d, \"\", 1) = %zu", fd, count);
 
 	return 0;
 }
@@ -135,17 +156,22 @@ void *bigmalloc(size_t size)
 	int ret;
 	struct bigmalloc_chunk *chunk;
 	size_t total_size;
+	int errsv;
 
 	fd = mktempfd();
 	if (fd < 0)
 		return NULL;
 
 	total_size = size + BIGMALLOC_HEADER_SIZE;
-	if (total_size < size)
+	if (total_size < size) {
+		errno = EINVAL;
 		goto error;
+	}
 
-	if (overcommit_file(fd, total_size))
+	if (overcommit_file(fd, total_size)) {
+		errno = ENOSPC;
 		goto error;
+	}
 
 	ret = stretch_file(fd, total_size);
 	if (ret)
@@ -162,7 +188,9 @@ void *bigmalloc(size_t size)
 
 	return bigmalloc_chunk_to_mem(chunk);
 error:
+	errsv = errno;
 	xclose(fd);
+	errno = errsv;
 
 	return NULL;
 }
@@ -173,7 +201,7 @@ void bigfree(void *ptr)
 	struct bigmalloc_chunk *chunk = mem_to_bigmalloc_chunk(ptr);
 
 	if (chunk->magic != BIGMALLOC_MAGIC)
-		err(EXIT_FAILURE, "bigfree: wrong magic %#x", chunk->magic);
+		diex("bigfree: wrong magic %#x", chunk->magic);
 
 	ret = munmap(chunk, chunk->size);
 	if (ret)
@@ -220,7 +248,7 @@ static void parse_options(int argc, char **argv)
 			use_malloc = 1;
 			break;
 		default:
-			err(EXIT_FAILURE, "invalid option: %c", c);
+			diex("invalid option: %c", c);
 		}
 	}
 }
@@ -234,18 +262,18 @@ int main(int argc, char **argv)
 
 	ptr = BIGMALLOC(bytes);
 	if (!ptr)
-		err(EXIT_FAILURE, "bigmalloc failed");
+		diex("bigmalloc failed");
 
 	ret = fread(ptr, 1, bytes, stdin);
 	if (ret < 0)
-		err(EXIT_FAILURE, "bigread failed");
+		die("bigread failed");
 
 	if (ret != bytes)
-		err(EXIT_FAILURE, "oops ret (%zu) != bytes (%zd)", ret, bytes);
+		diex("oops: ret (%zu) != bytes (%zd)", ret, bytes);
 
 	ret = fwrite(ptr, 1, bytes, stdout);
 	if (ret < 0)
-		err(EXIT_FAILURE, "bigwrite failed");
+		die("bigwrite failed");
 
 	BIGFREE(ptr);
 
