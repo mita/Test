@@ -1,8 +1,22 @@
 #define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <err.h>
+#include <stdarg.h>
+#include <syslog.h>
+
+static void die(const char *err, ...)
+{
+	va_list params;
+
+	va_start(params, err);
+	vsyslog(LOG_USER | LOG_ERR, err, params);
+	va_end(params);
+
+	exit(EXIT_FAILURE);
+}
 
 static void print_error(FILE *output)
 {
@@ -157,14 +171,14 @@ int main(int argc, char **argv)
 
 	db = fopen(db_path, "w");
 	if (!db)
-		err(EXIT_FAILURE, "fopen %s", db_path);
+		die("fopen %s", db_path);
 
 	input = fdopen(0, "r");
 	if (!input)
-		err(EXIT_FAILURE, "fdopen 0");
+		die("fdopen 0");
 	output = fdopen(1, "w");
 	if (!output)
-		err(EXIT_FAILURE, "fdopen 1");
+		die("fdopen 1");
 
 	memcachedb(input, output, db);
 

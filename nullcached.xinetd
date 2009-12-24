@@ -1,0 +1,16 @@
+service nullcached
+{
+	id			= nullcached
+	type			= UNLISTED
+	wait			= no
+	socket_type		= stream
+
+	user			= root
+
+	port			= 21201
+
+	log_on_success		+= USERID
+	log_on_failure 		+= USERID
+	server			= nullcached
+	server_args		= /tmp/nullcached.db
+}
