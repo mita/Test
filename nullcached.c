@@ -18,20 +18,34 @@ static void die(const char *err, ...)
 	exit(EXIT_FAILURE);
 }
 
-static void print_error(FILE *output)
+static void output_error(FILE *output)
 {
 	fprintf(output, "ERROR\r\n");
 	fflush(output);
 }
 
-static char *db_path;
+#if 0
+
+static void output_client_error(FILE *output, const char *error)
+{
+	fprintf(output, "CLIENT_ERROR %s\r\n", error);
+	fflush(output);
+}
+
+static void output_server_error(FILE *output, const char *error)
+{
+	fprintf(output, "SERVER_ERROR %s\r\n", error);
+	fflush(output);
+}
+
+#endif
+
+static char *db_pathname = "/dev/null";
 
 static void parse_options(int argc, char **argv)
 {
-	if (argc < 2)
-		exit(1);
-
-	db_path = argv[1];
+	if (argc >= 2)
+		db_pathname = argv[1];
 }
 
 static void swallow(FILE *input, unsigned long bytes)
@@ -125,15 +139,16 @@ static void process_set_command(FILE *input, FILE *output, FILE *db,
 
 	return;
 error:
-	print_error(output);
+	output_error(output);
 }
 
 static void memcachedb(FILE *input, FILE *output, FILE *db)
 {
+	char *line = NULL;
+	size_t len = 0;
+
 	while (1) {
-		char *line = NULL;
 		ssize_t ret;
-		size_t len = 0;
 		char cmd[BUFSIZ];
 		char key[BUFSIZ];
 		unsigned long flags;
@@ -155,32 +170,26 @@ static void memcachedb(FILE *input, FILE *output, FILE *db)
 		} else if (!strcmp(cmd, "get") && ret == 2) {
 			process_get_command(input, output, db, cmd, key);
 		} else {
-			print_error(output);
+			output_error(output);
 		}
-		free(line);
 	}
+	if (line)
+		free(line);
 }
 
 int main(int argc, char **argv)
 {
 	FILE *db;
-	FILE *input;
-	FILE *output;
 
 	parse_options(argc, argv);
 
-	db = fopen(db_path, "w");
+	db = fopen(db_pathname, "w");
 	if (!db)
-		die("fopen %s", db_path);
+		die("fopen %s", db_pathname);
 
-	input = fdopen(0, "r");
-	if (!input)
-		die("fdopen 0");
-	output = fdopen(1, "w");
-	if (!output)
-		die("fdopen 1");
+	memcachedb(stdin, stdout, db);
 
-	memcachedb(input, output, db);
+	fclose(db);
 
 	return 0;
 }

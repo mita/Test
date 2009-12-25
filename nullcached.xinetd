@@ -12,5 +12,5 @@ service nullcached
 	log_on_success		+= USERID
 	log_on_failure 		+= USERID
 	server			= nullcached
-	server_args		= /tmp/nullcached.db
+	server_args		= /dev/null
 }
