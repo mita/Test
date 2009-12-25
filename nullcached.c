@@ -6,6 +6,7 @@
 #include <err.h>
 #include <stdarg.h>
 #include <syslog.h>
+#include <stdbool.h>
 
 static void die(const char *err, ...)
 {
@@ -61,7 +62,7 @@ static void swallow(FILE *input, unsigned long bytes)
 	}
 }
 
-static void process_quit_command(FILE *input, FILE *output, FILE *db, char *cmd)
+static void process_quit_command(FILE *input, FILE *output, FILE *db)
 {
 	fclose(db);
 	fclose(output);
@@ -97,8 +98,7 @@ static ssize_t db_put(FILE *db, void *value, size_t bytes)
 	return bytes;
 }
 
-static void process_get_command(FILE *input, FILE *output, FILE *db,
-		char *cmd, char *key)
+static void process_get_command(FILE *input, FILE *output, FILE *db, char *key)
 {
 	char buf[BUFSIZ];
 	size_t len;
@@ -108,12 +108,10 @@ static void process_get_command(FILE *input, FILE *output, FILE *db,
 		fwrite(buf, 1, len, output);
 		fprintf(output, "\r\n");
 	}
-	fprintf(output, "END\r\n");
-	fflush(output);
 }
 
 static void process_set_command(FILE *input, FILE *output, FILE *db,
-		char *cmd, char *key, unsigned long flags,
+		char *key, unsigned long flags,
 		unsigned long exptime, unsigned long bytes)
 {
 	unsigned long total_size = bytes + strlen("\r\n");
@@ -142,6 +140,118 @@ error:
 	output_error(output);
 }
 
+enum {
+	/* Storage commands */
+	SET_OP,
+	ADD_OP,
+	REPLACE_OP,
+	APPEND_OP,
+	PREPEND_OP,
+	CAS_OP,
+	/* Retrieval commands */
+	GET_OP,
+	GETS_OP,
+	/* Deletion commands */
+	DELETE_OP,
+	/* Increment/Decrement commands */
+	INCR_OP,
+	DECR_OP,
+	/* Statistics commands */
+	STATS_OP,
+	/* Other commands */
+	FLUSH_ALL_OP,
+	VERSION_OP,
+	QUIT_OP,
+};
+
+enum {
+	INVALID_COMMAND = -1,
+	STORAGE_COMMAND,
+	RETRIEVAL_COMMAND,
+	DELETION_COMMAND,
+	INCR_DECR_COMMAND,
+	STATS_COMMAND,
+	OTHER_COMMAND,
+};
+
+static int command_type(const char *command)
+{
+	if (!strcmp(command, "set") || !strcmp(command, "add") ||
+		!strcmp(command, "replace") || !strcmp(command, "append") ||
+		!strcmp(command, "prepend") || !strcmp(command, "cas"))
+		return STORAGE_COMMAND;
+	else if (!strcmp(command, "get") || !strcmp(command, "gets"))
+		return RETRIEVAL_COMMAND;
+	else if (!strcmp(command, "delete"))
+		return DELETION_COMMAND;
+	else if (!strcmp(command, "incr") || !strcmp(command, "decr"))
+		return INCR_DECR_COMMAND;
+	else if (!strcmp(command, "stats"))
+		return STATS_COMMAND;
+	else if (!strcmp(command, "flush_all") || !strcmp(command, "version") ||
+		!strcmp(command, "quit"))
+		return OTHER_COMMAND;
+	else
+		return INVALID_COMMAND;
+}
+
+static bool check_line(const char *line, size_t n)
+{
+	return (line[n - 1] == '\r') && (line[n] == '\n');
+}
+
+static void split_line(char *line, char **command, char **arguments)
+{
+	*arguments = line;
+
+	*command = strsep(arguments, " \r");
+}
+
+static void process_storage_command(FILE *input, FILE *output, FILE *db,
+				const char *command, const char *arguments)
+{
+	int ret;
+	char key[BUFSIZ];
+	unsigned long flags;
+	unsigned long exptime;
+	unsigned long bytes;
+
+	ret = sscanf(arguments, "%250s %ld %ld %ld\r\n",
+			key, &flags, &exptime, &bytes);
+
+	if (!strcmp(command, "set") && ret == 4) {
+		process_set_command(input, output, db,
+				key, flags, exptime, bytes);
+	} else {
+		output_error(output);
+	}
+}
+
+static void process_retrieval_command(FILE *input, FILE *output, FILE *db,
+				const char *command, char *arguments)
+{
+	if (!strcmp(command, "get")) {
+		char *key;
+
+		while ((key = strsep(&arguments, " \r")) != NULL) {
+			process_get_command(input, output, db, key);
+		}
+		fprintf(output, "END\r\n");
+		fflush(output);
+	} else {
+		output_error(output);
+	}
+}
+
+static void process_other_command(FILE *input, FILE *output, FILE *db,
+				const char *command, const char *arguments)
+{
+	if (strcmp(command, "quit"))
+		process_quit_command(input, output, db);
+	else
+		output_error(output);
+}
+
 static void memcachedb(FILE *input, FILE *output, FILE *db)
 {
 	char *line = NULL;
@@ -149,28 +259,41 @@ static void memcachedb(FILE *input, FILE *output, FILE *db)
 
 	while (1) {
 		ssize_t ret;
-		char cmd[BUFSIZ];
-		char key[BUFSIZ];
-		unsigned long flags;
-		unsigned long exptime;
-		unsigned long bytes;
+		char *command;
+		char *arguments;
 
 		ret = getline(&line, &len, input);
 		if (ret < 0)
 			break;
 
-		ret = sscanf(line, "%s %s %ld %ld %ld\r\n",
-				cmd, key, &flags, &exptime, &bytes);
-
-		if (!strcmp(cmd, "quit") && ret == 1) {
-			process_quit_command(input, output, db, cmd);
-		} else if (!strcmp(cmd, "set") && ret == 5) {
-			process_set_command(input, output, db,
-					cmd, key, flags, exptime, bytes);
-		} else if (!strcmp(cmd, "get") && ret == 2) {
-			process_get_command(input, output, db, cmd, key);
-		} else {
+		if (!check_line(line, ret)) {
 			output_error(output);
+			continue;
+		}
+		split_line(line, &command, &arguments);
+
+		switch (command_type(command)) {
+		case STORAGE_COMMAND:
+			process_storage_command(input, output, db,
+						command, arguments);
+			break;
+		case RETRIEVAL_COMMAND:
+			process_retrieval_command(input, output, db,
+						command, arguments);
+			break;
+		case DELETION_COMMAND:
+			break;
+		case INCR_DECR_COMMAND:
+			break;
+		case STATS_COMMAND:
+			break;
+		case OTHER_COMMAND:
+			process_other_command(input, output, db,
+						command, arguments);
+			break;
+		default:
+			output_error(output);
+			break;
 		}
 	}
 	if (line)
