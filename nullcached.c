@@ -197,7 +197,7 @@ static int command_type(const char *command)
 
 static bool check_line(const char *line, size_t n)
 {
-	return (line[n - 1] == '\r') && (line[n] == '\n');
+	return (n >= 2) && (line[n - 2] == '\r') && (line[n - 1] == '\n');
 }
 
 static void split_line(char *line, char **command, char **arguments)
@@ -246,7 +246,7 @@ static void process_retrieval_command(FILE *input, FILE *output, FILE *db,
 static void process_other_command(FILE *input, FILE *output, FILE *db,
 				const char *command, const char *arguments)
 {
-	if (strcmp(command, "quit"))
+	if (!strcmp(command, "quit"))
 		process_quit_command(input, output, db);
 	else
 		output_error(output);
