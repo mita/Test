@@ -1,12 +1,16 @@
 CFLAGS = -g -O2 -Wall
+TARGETS = bigmalloc nullcached getsockipmtu
 
-all: bigmalloc nullcached
+all: $(TARGETS)
 
 bigmalloc: bigmalloc.c
-	gcc $(CFLAGS) -o bigmalloc $<
+	gcc $(CFLAGS) -o $@ $<
 
 nullcached: nullcached.c
-	gcc $(CFLAGS) -o nullcached $<
+	gcc $(CFLAGS) -o $@ $<
+
+getsockipmtu: getsockipmtu.c
+	gcc $(CFLAGS) -o $@ $<
 
 clean:
-	-rm -f bigmalloc nullcached
+	-rm -f $(TARGETS)
