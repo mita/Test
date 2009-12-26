@@ -117,6 +117,7 @@ int main(int argc, char **argv)
 		die("unable to get mtu (%s)", strerror(errno));
 
 	printf("%d\n", mtu);
+	close(sockfd);
 
 	return 0;
 }
