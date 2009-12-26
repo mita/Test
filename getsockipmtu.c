@@ -2,6 +2,9 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+/*
+ * /usr/include/linux/in.h
+ */
 #define IP_MTU 14
 
 int getsockipmtu(int sockfd)
