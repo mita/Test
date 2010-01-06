@@ -24,7 +24,7 @@ static void *xmalloc(size_t size)
 
 	ptr = malloc(size);
 	if (!ptr)
-		die("out of memory");
+		die("malloc: out of memory");
 
 	return ptr;
 }
@@ -36,7 +36,7 @@ static void xpthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
 	ret = pthread_create(thread, attr, start_routine, arg);
 	if (ret)
-		die("pthread_create %d", ret);
+		die("pthread_create: %d", ret);
 }
 
 static int tcp_nodelay;
@@ -52,7 +52,7 @@ static void do_chunkd_set(struct st_client *stc, const char *key,
 
 	ret = stc_put_inline(stc, key, key_length, value, value_length, 0);
 	if (!ret)
-		warn("stc_put failed");
+		warnx("stc_put failed");
 }
 
 static void do_chunkd_get(struct st_client *stc, const char *key,
@@ -63,7 +63,7 @@ static void do_chunkd_get(struct st_client *stc, const char *key,
 
 	value = stc_get_inline(stc, key, key_length, &value_length);
 	if (!value)
-		warn("stc_get failed");
+		warnx("stc_get failed");
 
 	free(value);
 }
@@ -103,7 +103,8 @@ static void run(const int id, const char *server, const int value_length,
 	if (!stc)
 		die("stc_new failed");
 
-	ret = stc_table_openz(stc, "testtable", CHF_TBL_CREAT);
+	ret = stc_table_openz(stc, "testtable",
+			command == 'w' ? CHF_TBL_CREAT : 0);
 	if (!ret)
 		die("stc_table_openz failed");
 
@@ -129,9 +130,8 @@ static void do_memcached_set(memcached_st *memc, const char *key,
 	memcached_return ret;
 
 	ret = memcached_set(memc, key, key_length, value, value_length, 0, 0);
-	if (ret != MEMCACHED_SUCCESS) {
-		warn("memcached_set: %s", memcached_strerror(memc, ret));
-	}
+	if (ret != MEMCACHED_SUCCESS)
+		warnx("memcached_set: %s", memcached_strerror(memc, ret));
 }
 
 static void do_memcached_get(memcached_st *memc, const char *key,
@@ -145,7 +145,7 @@ static void do_memcached_get(memcached_st *memc, const char *key,
 	value = memcached_get(memc, key, key_length, &value_length,
 				&flags, &ret);
 	if (ret != MEMCACHED_SUCCESS)
-		warn("memcached_get: %s", memcached_strerror(memc, ret));
+		warnx("memcached_get: %s", memcached_strerror(memc, ret));
 
 	free(value);
 }
@@ -168,13 +168,13 @@ static void run(const int id, const char *server, const int value_length,
 	ret = memcached_server_push(&memc, servers);
 
 	if (ret != MEMCACHED_SUCCESS)
-		die("memcached_server_push failed: %d", ret);
+		die("memcached_server_push: %d", ret);
 
 	if (tcp_nodelay) {
 		ret = memcached_behavior_set(&memc,
 					MEMCACHED_BEHAVIOR_TCP_NODELAY, 1);
 		if (ret != MEMCACHED_SUCCESS)
-			die("memcached_behavior_set failed: %d", ret);
+			die("memcached_behavior_set: %d", ret);
 	}
 
 	for (i =  0; i < requests; i++) {
@@ -274,11 +274,11 @@ static void wait_threads(pthread_t *threads, int n)
 
 		ret = pthread_join(threads[i], &value);
 		if (ret) {
-			warn("pthread_join");
+			warnx("pthread_join: %d", ret);
 			continue;
 		}
 		if (value != NULL)
-			warn("thread returns non NULL value %p", value);
+			warnx("thread returns non NULL value %p", value);
 	}
 }
 
