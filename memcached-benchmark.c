@@ -1,3 +1,6 @@
+#define _GNU_SOURCE
+
+#include <stdarg.h>
 #include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,7 +8,15 @@
 #include <getopt.h>
 #include <pthread.h>
 #include <sys/time.h>
-#include <libmemcached/memcached.h>
+
+static void die(const char *err, ...)
+{
+	va_list params;
+
+	va_start(params, err);
+	verrx(EXIT_FAILURE, err, params);
+	va_end(params);
+}
 
 static void *xmalloc(size_t size)
 {
@@ -13,7 +24,7 @@ static void *xmalloc(size_t size)
 
 	ptr = malloc(size);
 	if (!ptr)
-		err(EXIT_FAILURE, "out of memory");
+		die("out of memory");
 
 	return ptr;
 }
@@ -25,8 +36,92 @@ static void xpthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
 	ret = pthread_create(thread, attr, start_routine, arg);
 	if (ret)
-		err(EXIT_FAILURE, "pthread_create %d", ret);
+		die("pthread_create %d", ret);
 }
+
+static int tcp_nodelay;
+
+#ifdef CHUNKD_BENCHMARK
+
+#include <chunkc.h>
+
+static void do_chunkd_set(struct st_client *stc, const char *key,
+		size_t key_length, char *value, size_t value_length)
+{
+	bool ret;
+
+	ret = stc_put_inline(stc, key, key_length, value, value_length, 0);
+	if (!ret)
+		warn("stc_put failed");
+}
+
+static void do_chunkd_get(struct st_client *stc, const char *key,
+				size_t key_length)
+{
+	char *value;
+	size_t value_length;
+
+	value = stc_get_inline(stc, key, key_length, &value_length);
+	if (!value)
+		warn("stc_get failed");
+
+	free(value);
+}
+
+static struct st_client *stc_new2(const char *server)
+{
+	char *host;
+	char *port;
+
+	host = strdupa(server);
+
+	host = strtok(host, ":");
+	if (!host)
+		return NULL;
+
+	port = strtok(NULL, ":");
+	if (!port)
+		return NULL;
+
+	return stc_new(host, atoi(port), "testuser", "testuser", false);
+}
+
+static void run(const int id, const char *server, const int value_length,
+			const int requests, const int command)
+{
+	char key[20];
+	char *value;
+	int i;
+	struct st_client *stc;
+	bool ret;
+
+	value = xmalloc(value_length);
+	memset(value, '*', value_length);
+
+	stc_init();
+	stc = stc_new2(server);
+	if (!stc)
+		die("stc_new failed");
+
+	ret = stc_table_openz(stc, "testtable", CHF_TBL_CREAT);
+	if (!ret)
+		die("stc_table_openz failed");
+
+	for (i =  0; i < requests; i++) {
+		sprintf(key, "%04d-%011d", id, i);
+
+		if (command == 'w')
+			do_chunkd_set(stc, key, 16, value, value_length);
+		else
+			do_chunkd_get(stc, key, 16);
+	}
+	stc_free(stc);
+	free(value);
+}
+
+#else /* CHUNKD_BENCHMARK */
+
+#include <libmemcached/memcached.h>
 
 static void do_memcached_set(memcached_st *memc, const char *key,
 		size_t key_length, const char *value, size_t value_length)
@@ -55,8 +150,6 @@ static void do_memcached_get(memcached_st *memc, const char *key,
 	free(value);
 }
 
-static int tcp_nodelay;
-
 static void run(const int id, const char *server, const int value_length,
 			const int requests, const int command)
 {
@@ -75,12 +168,13 @@ static void run(const int id, const char *server, const int value_length,
 	ret = memcached_server_push(&memc, servers);
 
 	if (ret != MEMCACHED_SUCCESS)
-		err(EXIT_FAILURE, "memcached_server_push failed");
+		die("memcached_server_push failed: %d", ret);
 
 	if (tcp_nodelay) {
-		ret = memcached_behavior_set(&memc, MEMCACHED_BEHAVIOR_TCP_NODELAY, 1);
+		ret = memcached_behavior_set(&memc,
+					MEMCACHED_BEHAVIOR_TCP_NODELAY, 1);
 		if (ret != MEMCACHED_SUCCESS)
-			err(EXIT_FAILURE, "memcached_behavior_set failed");
+			die("memcached_behavior_set failed: %d", ret);
 	}
 
 	for (i =  0; i < requests; i++) {
@@ -97,6 +191,8 @@ static void run(const int id, const char *server, const int value_length,
 
 	free(value);
 }
+
+#endif /* CHUNKD_BENCHMARK */
 
 static unsigned long value_length = 100UL;
 static unsigned long requests = 100000UL;
@@ -125,10 +221,8 @@ static void parse_options(int argc, char **argv)
 			threads = atoi(optarg);
 			break;
 		case 'r':
-			command = 'r';
-			break;
 		case 'w':
-			command = 'w';
+			command = c;
 			break;
 		case 'v':
 			verbose = 1;
@@ -137,7 +231,7 @@ static void parse_options(int argc, char **argv)
 			tcp_nodelay = 1;
 			break;
 		default:
-			err(EXIT_FAILURE, "invalid option: %c", c);
+			die("invalid option: %c", c);
 		}
 	}
 }
