@@ -61,7 +61,7 @@ static int mktempfd(void)
 			break;
 
 		if (errno != EEXIST)
-			die("bigmalloc: mkostemp(%s/%s)",
+			die("bigmalloc: mkstemp(%s/%s)",
 				bigmalloc_tmp_dir(), BIGMALLOC_TMP_TEMPLATE);
 
 		sprintf(tmpfile, "%s/%s",
