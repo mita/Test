@@ -62,8 +62,10 @@ static void do_chunkd_get(struct st_client *stc, const char *key,
 	size_t value_length;
 
 	value = stc_get_inline(stc, key, key_length, &value_length);
-	if (!value)
+	if (!value) {
 		warnx("stc_get failed");
+		return;
+	}
 
 	free(value);
 }
@@ -144,8 +146,10 @@ static void do_memcached_get(memcached_st *memc, const char *key,
 
 	value = memcached_get(memc, key, key_length, &value_length,
 				&flags, &ret);
-	if (ret != MEMCACHED_SUCCESS)
+	if (ret != MEMCACHED_SUCCESS) {
 		warnx("memcached_get: %s", memcached_strerror(memc, ret));
+		return;
+	}
 
 	free(value);
 }
