@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#define _LARGEFILE64_SOURCE
+#define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -42,16 +42,6 @@ static const char *bigmalloc_tmp_dir(void)
 	return !tmp_dir ? DEFAULT_TMP_DIR : tmp_dir;
 }
 
-#ifndef HAVE_MKOSTEMP
-
-static int mkostemp(char *template, int flags)
-{
-	mktemp(template);
-	return open(template, O_CREAT | O_EXCL | O_RDWR | flags);
-}
-
-#endif
-
 static int mktempfd(void)
 {
 	char *tmpfile;
@@ -66,7 +56,7 @@ static int mktempfd(void)
 	}
 
 	while (1) {
-		fd = mkostemp(tmpfile, O_LARGEFILE);
+		fd = mkstemp(tmpfile);
 		if (fd >= 0)
 			break;
 
