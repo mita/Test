@@ -286,7 +286,7 @@ static void benchmark(void)
 {
 	int i;
 	long sum = 0;
-	long avg;
+	long min_ms = LONG_MAX, max_ms = 0, avg_ms;
 	pthread_t *tid;
 	struct benchmark_thread_data *data;
 
@@ -299,11 +299,23 @@ static void benchmark(void)
 	}
 	wait_threads(tid, threads);
 
-	for (i = 0; i < threads; i++)
-		sum += data[i].time_ms;
+#define _MIN(a, b) ((a) < (b) ? (a) : (b))
+#define _MAX(a, b) ((a) < (b) ? (b) : (a))
 
-	avg = sum / threads;
-	printf("%d %ld.%03ld\n", threads, avg / 1000, avg % 1000);
+	for (i = 0; i < threads; i++) {
+		long ms = data[i].time_ms;
+
+		sum += ms;
+		min_ms = _MIN(min_ms, ms);
+		max_ms = _MAX(max_ms, ms);
+	}
+
+	avg_ms = sum / threads;
+
+	printf("%d %ld.%03ld %ld.%03ld %ld.%03ld\n", threads,
+			avg_ms / 1000, avg_ms % 1000,
+			min_ms / 1000, min_ms % 1000,
+			max_ms / 1000, max_ms % 1000);
 
 	if (verbose) {
 		unsigned long long total_bytes;
@@ -313,7 +325,7 @@ static void benchmark(void)
 		total_bytes *= threads;
 		total_bytes *= requests;
 
-		bytes_per_msec = total_bytes / avg;
+		bytes_per_msec = total_bytes / avg_ms;
 
 		printf("Throughput: %llu KB/sec\n",
 				bytes_per_msec * 1000UL / 1024UL);
