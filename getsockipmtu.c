@@ -2,6 +2,8 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+#ifdef __linux__
+
 /*
  * /usr/include/linux/in.h
  */
@@ -17,6 +19,15 @@ int getsockipmtu(int sockfd)
 
 	return ret < 0 ? -1 : mtu;
 }
+
+#else
+
+int getsockipmtu(int sockfd)
+{
+	return -1;
+}
+
+#endif
 
 // Test program
 

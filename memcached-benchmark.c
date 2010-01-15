@@ -7,6 +7,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <pthread.h>
+#include <limits.h>
 #include <sys/time.h>
 
 static void die(const char *err, ...)
