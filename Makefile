@@ -24,7 +24,9 @@ memcached-benchmark: memcached-benchmark.c
 	$(CC) $(CFLAGS) -o $@ $< -lmemcached
 
 chunkd-benchmark: memcached-benchmark.c
-	$(CC) $(CFLAGS) $(shell pkg-config glib-2.0 --cflags) -DCHUNKD_BENCHMARK -o $@ $< -lpthread -lxml2 -lchunkdc -lssl -lglib-2.0
+	$(CC) $(CFLAGS) $(shell pkg-config glib-2.0 --cflags) \
+		-DCHUNKD_BENCHMARK -o $@ $< -lpthread -lxml2 -lchunkdc -lssl \
+		$(shell pkg-config glib-2.0 gio-2.0 --libs)
 
 clean:
 	-rm -f $(TARGETS)
