@@ -3,11 +3,11 @@ import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
-public class MemcachedBenchmark extends Thread {
+public class MemCachedBenchmark extends Thread {
 	public int id;
 	public long time_ms;
 
-	public MemcachedBenchmark(int i) {
+	public MemCachedBenchmark(int i) {
 		super();
 		id = i;
 	}
@@ -16,14 +16,14 @@ public class MemcachedBenchmark extends Thread {
 		byte[] value;
 		MemCachedClient mc;
 
-		value = new byte[MemcachedBenchmark.valueLength];
+		value = new byte[MemCachedBenchmark.valueLength];
 		Arrays.fill(value, (byte)'*');
 
 		mc = new MemCachedClient();
-		for (long i = 0; i < MemcachedBenchmark.numRequests; i++) {
+		for (long i = 0; i < MemCachedBenchmark.numRequests; i++) {
 			String key = String.format("%04d-%011d", id, i);
 
-			if (MemcachedBenchmark.command == 'w') {
+			if (MemCachedBenchmark.command == 'w') {
 				mc.set(key, value);
 			} else {
 				mc.get(key);
@@ -45,24 +45,29 @@ public class MemcachedBenchmark extends Thread {
 	}
 
 	public static void benchmark() throws Exception {
-		MemcachedBenchmark[] threads;
+		MemCachedBenchmark[] threads;
 		SockIOPool pool = SockIOPool.getInstance();
 		long sum = 0;
 		long min_ms = Long.MAX_VALUE;
 		long max_ms = 0;
 		long avg_ms;
 
-		pool.setServers(MemcachedBenchmark.servers);
-		//pool.setNagle(false);
+		pool.setServers(MemCachedBenchmark.servers);
+		if (MemCachedBenchmark.tcp_nodelay) {
+			pool.setNagle(false);
+		} else {
+			pool.setNagle(true);
+		}
 		pool.initialize();
-		if (MemcachedBenchmark.verbose == 0) {
+
+		if (!MemCachedBenchmark.verbose) {
 			Logger logger = Logger.getLogger(MemCachedClient.class.getName());
 			logger.setLevel(Logger.LEVEL_WARN);
 		}
 
-		threads = new MemcachedBenchmark[numThreads];
+		threads = new MemCachedBenchmark[numThreads];
 		for (int i = 0; i < numThreads; i++) {
-			threads[i] = new MemcachedBenchmark(i);
+			threads[i] = new MemCachedBenchmark(i);
 		}
 		for (int i = 0; i < numThreads; i++) {
 			threads[i].start();
@@ -88,9 +93,9 @@ public class MemcachedBenchmark extends Thread {
 	/* 'r' for Read, 'w' for Write request */
 	private static char command = 'w';
 	private static int numThreads = 8;
-	private static int verbose = 0;
+	private static boolean verbose = false;
 	private static String[] servers = { "127.0.0.1:21201" };
-	private static int tcp_nodelay = 0;
+	private static boolean tcp_nodelay = false;
 
 	public static void parseOptions(String args[]) {
 		for (int i = 0; i < args.length; i++) {
@@ -111,9 +116,9 @@ public class MemcachedBenchmark extends Thread {
 			} else if (args[i].equals("-w")) {
 				command = 'w';
 			} else if (args[i].equals("-v")) {
-				verbose = 1;
+				verbose = true;
 			} else if (args[i].equals("-d")) {
-				tcp_nodelay = 1;
+				tcp_nodelay = true;
 			} else {
 				System.err.println("invalid option");
 			}
