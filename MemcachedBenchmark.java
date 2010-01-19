@@ -47,6 +47,7 @@ public class MemcachedBenchmark extends Thread {
 			runBenchmark();
 		} catch (Exception e) {
 			System.err.println("benchmark failed: " + e);
+			e.printStackTrace();
 		}
 		long end = System.currentTimeMillis();
 
@@ -117,7 +118,6 @@ public class MemcachedBenchmark extends Thread {
 			} else {
 				System.err.println("invalid option");
 			}
-			i++;
 		}
 	}
 
