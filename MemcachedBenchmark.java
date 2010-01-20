@@ -7,16 +7,6 @@ public class MemcachedBenchmark extends Thread {
 	public int id;
 	public long time_ms;
 
-	public static void set(MemcachedClient c, String key, byte[] value) {
-		c.set(key, 1000000, value);
-	}
-
-	public static String get(MemcachedClient c, String key) {
-		Object value = c.get(key);
-
-		return value.toString();
-	}
-
 	public MemcachedBenchmark(int i) {
 		super();
 		id = i;
@@ -33,10 +23,11 @@ public class MemcachedBenchmark extends Thread {
 		for (long i = 0; i < MemcachedBenchmark.numRequests; i++) {
 			String key = String.format("%04d-%011d", id, i);
 			if (MemcachedBenchmark.command == 'w') {
-				MemcachedBenchmark.set(c, key, value);
+				c.set(key, 100000, value);
 				c.waitForQueues(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-			} else
-				MemcachedBenchmark.get(c, key);
+			} else {
+				c.get(key);
+			}
 		}
 		c.shutdown(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
 	}
