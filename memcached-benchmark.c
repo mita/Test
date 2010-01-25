@@ -101,7 +101,6 @@ static void run(const int id, const char *server, const int value_length,
 	value = xmalloc(value_length);
 	memset(value, '*', value_length);
 
-	stc_init();
 	stc = stc_new2(server);
 	if (!stc)
 		die("stc_new failed");
@@ -294,6 +293,10 @@ static void benchmark(void)
 	long min_ms = LONG_MAX, max_ms = 0, avg_ms;
 	pthread_t *tid;
 	struct benchmark_thread_data *data;
+
+#ifdef CHUNKD_BENCHMARK
+	stc_init();
+#endif
 
 	tid = xmalloc(sizeof(tid[0]) * threads);
 	data = xmalloc(sizeof(data[0]) * threads);
