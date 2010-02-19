@@ -1,0 +1,176 @@
+Index: memcachedb.c
+===================================================================
+--- memcachedb.c	(リビジョン 98)
++++ memcachedb.c	(作業コピー)
+@@ -910,6 +910,69 @@
+     out_string(c, "ERROR");
+ }
+ 
++static int txn_begin_and_cursor(DB_TXN **txn, DBC **cursorp, u_int32_t flags)
++{
++    int ret;
++
++    /* transcation and cursor */
++    ret = env->txn_begin(env, NULL, txn, 0);
++    if (ret != 0)
++        return ret;
++
++    /* Get a cursor, we use 2 degree isolation */
++    ret = dbp->cursor(dbp, *txn, cursorp, flags); 
++    if (ret != 0)
++        return ret;
++
++    return 0;
++}
++
++static int conn_grow(conn *c, int i)
++{
++    if (i < c->isize)
++        return 0;
++
++    item **new_list = realloc(c->ilist, sizeof(item *) * c->isize * 2);
++
++    if (!new_list)
++        return -1;
++
++    c->isize *= 2;
++    c->ilist = new_list;
++
++    return 0;
++}
++
++static int conn_push_value(conn *c, item *it, int i)
++{
++    int ret;
++
++    ret = conn_grow(c, i);
++    if (ret)
++        return ret;
++
++    /*
++     * Construct the response. Each hit adds three elements to the
++     * outgoing data list:
++     *   "VALUE "
++     *   key
++     *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
++     */
++
++    if (add_iov(c, "VALUE ", 6) != 0 ||
++       add_iov(c, ITEM_key(it), it->nkey) != 0 ||
++       add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0) {
++        return -1;
++    }
++
++    if (settings.verbose > 1)
++        fprintf(stderr, ">%d sending key %s\n", c->sfd, ITEM_key(it));
++
++    *(c->ilist + i) = it;
++
++    return 0;
++}
++
+ /* ntokens is overwritten here... shrug.. */
+ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens) {
+     char *key;
+@@ -924,6 +987,9 @@
+ 
+     do {
+         while(key_token->length != 0) {
++            int ret;
++            DB_TXN *txn;
++            DBC *cursorp;
+ 
+             key = key_token->value;
+             nkey = key_token->length;
+@@ -939,48 +1005,38 @@
+             }
+ 
+             stats_get_cmds++;
+-            
+-            it = item_get(key, nkey);
+ 
+-            if (it) {
+-                if (i >= c->isize) {
+-                    item **new_list = realloc(c->ilist, sizeof(item *) * c->isize * 2);
+-                    if (new_list) {
+-                        c->isize *= 2;
+-                        c->ilist = new_list;
+-                    } else { 
+-                        item_free(it);
+-                        it = NULL;
+-                        break;
+-                    }
+-                }
++            ret = txn_begin_and_cursor(&txn, &cursorp, DB_READ_COMMITTED);
++            if (ret != 0) {
++                fprintf(stderr, "envp->txn_begin or dbp->cursor: %s\n",
++                        db_strerror(ret));
++                out_string(c, "SERVER_ERROR envp->txn_begin or dbp->cursor");
++                return;
++            }
+ 
+-                /*
+-                 * Construct the response. Each hit adds three elements to the
+-                 * outgoing data list:
+-                 *   "VALUE "
+-                 *   key
+-                 *   " " + flags + " " + data length + "\r\n" + data (with \r\n)
+-                 */
++            it = item_cget(cursorp, key, nkey, DB_SET);
++            if (it)
++                stats_get_hits++;
++            else
++                stats_get_misses++;
+ 
+-                if (add_iov(c, "VALUE ", 6) != 0 ||
+-                   add_iov(c, ITEM_key(it), it->nkey) != 0 ||
+-                   add_iov(c, ITEM_suffix(it), it->nsuffix + it->nbytes) != 0)
+-                   {
+-                       item_free(it);
+-                       it = NULL;
+-                       break;
+-                   }
+-
+-                if (settings.verbose > 1)
+-                    fprintf(stderr, ">%d sending key %s\n", c->sfd, ITEM_key(it));
+-
+-                stats_get_hits++;
+-                *(c->ilist + i) = it;
++            while (it) {
++                ret = conn_push_value(c, it, i);
++                if (ret) {
++                    item_free(it);
++                    it = NULL;
++                    break;
++                }
+                 i++;
++                it = item_cget(cursorp, NULL, 0, DB_NEXT_DUP);
++            }
++            cursorp->close(cursorp);
+ 
+-            } else {
+-                stats_get_misses++;
++            /* txn commit */
++            ret = txn->commit(txn, 0);
++            if (ret != 0) {
++                fprintf(stderr, "txn->commit: %s\n", db_strerror(ret));
++                txn->abort(txn);
+             }
+ 
+             key_token++;
+Index: bdb.c
+===================================================================
+--- bdb.c	(リビジョン 98)
++++ bdb.c	(作業コピー)
+@@ -306,6 +306,11 @@
+             exit(EXIT_FAILURE);
+         }
+ 
++        if ((ret = dbp->set_flags(dbp, DB_DUP)) != 0) {
++            fprintf(stderr, "dbp->set_flags: %s\n", db_strerror(ret));
++            exit(EXIT_FAILURE);
++        }
++
+         /* try to open db*/
+         ret = dbp->open(dbp, NULL, bdb_settings.db_file, NULL, bdb_settings.db_type, bdb_settings.db_flags, 0664);         
+         switch (ret){

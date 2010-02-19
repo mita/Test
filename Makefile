@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -g -O2 -Wall -I $(HOME)/include -L $(HOME)/lib
 TARGETS = bigmalloc nullcached getsockipmtu echoline cat memcached-benchmark \
-		chunkd-benchmark
+		chunkd-benchmark multimap-memcachedb-test
 
 all: $(TARGETS)
 
@@ -27,6 +27,9 @@ chunkd-benchmark: memcached-benchmark.c
 	$(CC) $(CFLAGS) $(shell pkg-config glib-2.0 --cflags) \
 		-DCHUNKD_BENCHMARK -o $@ $< -lpthread -lxml2 -lchunkdc -lssl \
 		$(shell pkg-config glib-2.0 gio-2.0 --libs)
+
+multimap-memcachedb-test: multimap-memcachedb-test.c
+	$(CC) $(CFLAGS) -o $@ $< -lmemcached
 
 clean:
 	-rm -f $(TARGETS)
