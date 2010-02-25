@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -g -O2 -Wall -I $(HOME)/include -L $(HOME)/lib
 TARGETS = bigmalloc nullcached getsockipmtu echoline cat memcached-benchmark \
-		chunkd-benchmark multimap-memcachedb-test
+		chunkd-benchmark multimap-memcachedb-test tokyocabinet-test
 
 all: $(TARGETS)
 
@@ -30,6 +30,9 @@ chunkd-benchmark: memcached-benchmark.c
 
 multimap-memcachedb-test: multimap-memcachedb-test.c
 	$(CC) $(CFLAGS) -o $@ $< -lmemcached
+
+tokyocabinet-test: tokyocabinet-test.c
+	$(CC) $(CFLAGS) -o $@ $< -ltokyocabinet
 
 clean:
 	-rm -f $(TARGETS)

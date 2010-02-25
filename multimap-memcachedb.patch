@@ -158,6 +158,50 @@ Index: memcachedb.c
              }
  
              key_token++;
+Index: doc/multimap.txt
+===================================================================
+--- doc/multimap.txt	(リビジョン 0)
++++ doc/multimap.txt	(リビジョン 0)
+@@ -0,0 +1,39 @@
++Multimap MemcacheDB
++===================
++
++Multimap MemcacheDB permits storing duplicate data items for the same key.
++Retrieval request may response multiple items for just one key.
++
++All commands supported by MemcacheDB are also supported by Multimap MemcacheDB.
++But some commands ("append", "prepend", "incr", "decr") do not behave as
++expected and undefined.
++
++Examples
++========
++
++libmemcached client example
++
++  // store duplicate data items for the same key
++  memcached_set(&memc, "key", 3, "value1", 7, 0, 0);
++  memcached_set(&memc, "key", 3, "value2", 7, 0, 0);
++  memcached_set(&memc, "key", 3, "value3", 7, 0, 0);
++
++  // retrieve multiple items for a key
++  const char *keys[] = { "key", };
++  const size_t key_lens[] = { 3, };
++  memcached_mget(&memc, keys, key_lens, 1);
++
++  value1 = memcached_fetch(&memc, NULL, NULL, &value1_length, &flags, &ret);
++  value2 = memcached_fetch(&memc, NULL, NULL, &value2_length, &flags, &ret);
++  value3 = memcached_fetch(&memc, NULL, NULL, &value3_length, &flags, &ret);
++
++  // MEMCACHED_END is returned when all object that have been found are
++  // returned
++  value4 = memcached_fetch(&memc, NULL, NULL, &value4_length, &flags, &ret);
++  assert(value4 == NULL && ret == MEMCACHED_END);
++
++  // values returned by memcached_fetch() must be freed
++  free(value1);
++  free(value2);
++  free(value3);
++
 Index: bdb.c
 ===================================================================
 --- bdb.c	(リビジョン 98)
