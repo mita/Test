@@ -1,7 +1,7 @@
 Index: memcachedb.c
 ===================================================================
---- memcachedb.c	(リビジョン 98)
-+++ memcachedb.c	(作業コピー)
+--- memcachedb.c	(revision 98)
++++ memcachedb.c	(working copy)
 @@ -910,6 +910,69 @@
      out_string(c, "ERROR");
  }
@@ -160,8 +160,8 @@ Index: memcachedb.c
              key_token++;
 Index: doc/multimap.txt
 ===================================================================
---- doc/multimap.txt	(リビジョン 0)
-+++ doc/multimap.txt	(リビジョン 0)
+--- doc/multimap.txt	(revision 0)
++++ doc/multimap.txt	(revision 0)
 @@ -0,0 +1,39 @@
 +Multimap MemcacheDB
 +===================
@@ -170,8 +170,8 @@ Index: doc/multimap.txt
 +Retrieval request may response multiple items for just one key.
 +
 +All commands supported by MemcacheDB are also supported by Multimap MemcacheDB.
-+But some commands ("append", "prepend", "incr", "decr") do not behave as
-+expected and undefined.
++But some commands ("append", "prepend", "replace", "incr", "decr") do not
++behave as expected and undefined.
 +
 +Examples
 +========
@@ -204,8 +204,8 @@ Index: doc/multimap.txt
 +
 Index: bdb.c
 ===================================================================
---- bdb.c	(リビジョン 98)
-+++ bdb.c	(作業コピー)
+--- bdb.c	(revision 98)
++++ bdb.c	(working copy)
 @@ -306,6 +306,11 @@
              exit(EXIT_FAILURE);
          }
