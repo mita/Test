@@ -34,7 +34,7 @@ static TCBDB *open_db(void)
 
 	bdb = tcbdbnew();
 
-	if(!tcbdbopen(bdb, "casket.tcb", BDBOWRITER | BDBOCREAT)){
+	if (!tcbdbopen(bdb, "casket.tcb", BDBOWRITER | BDBOCREAT)){
 		int ecode = tcbdbecode(bdb);
 		fprintf(stderr, "open error: %s\n", tcbdberrmsg(ecode));
 	}
@@ -43,7 +43,7 @@ static TCBDB *open_db(void)
 
 static void close_db(TCBDB *bdb)
 {
-	if(!tcbdbclose(bdb)){
+	if (!tcbdbclose(bdb)){
 		int ecode = tcbdbecode(bdb);
 		fprintf(stderr, "close error: %s\n", tcbdberrmsg(ecode));
 	}
@@ -66,8 +66,19 @@ static void populate_db(TCBDB *bdb, unsigned long count, int value_length)
 			int ecode = tcbdbecode(bdb);
 			fprintf(stderr, "put error: %s\n", tcbdberrmsg(ecode));
 		}
+
+		/* put noises */
+		sprintf(key, "/x%016lu", i);
+		tcbdbput2(bdb, key, value);
+
+		sprintf(key, "1x%016lu", i);
+		tcbdbput2(bdb, key, value);
 	}
 	free(value);
+}
+
+static void read_value(char *value)
+{
 }
 
 static void get_db(TCBDB *bdb, unsigned long count)
@@ -85,6 +96,7 @@ static void get_db(TCBDB *bdb, unsigned long count)
 			int ecode = tcbdbecode(bdb);
 			fprintf(stderr, "get error: %s\n", tcbdberrmsg(ecode));
 		}
+		read_value(value);
 		free(value);
 	}
 }
@@ -93,19 +105,22 @@ static void cursor_db(TCBDB *bdb, unsigned long count)
 {
 	BDBCUR *cur;
 	char *key, *value;
-	char start_key[20];
-	char end_key[20];
+	char key_prefix[20];
 
-	sprintf(start_key, "0x%016lu", 0UL);
-	sprintf(end_key, "0x%016lu", count - 1);
+	sprintf(key_prefix, "%s", "0x");
 
 	cur = tcbdbcurnew(bdb);
-	tcbdbcurjump2(cur, start_key);
+	tcbdbcurjump2(cur, key_prefix);
 
 	while ((key = tcbdbcurkey2(cur)) != NULL) {
+		if (strncmp(key, key_prefix, 2) != 0)
+			break;
+
 		value = tcbdbcurval2(cur);
-		free(value);
+		read_value(value);
+
 		free(key);
+		free(value);
 		tcbdbcurnext(cur);
 	}
 	tcbdbcurdel(cur);
@@ -114,16 +129,30 @@ static void cursor_db(TCBDB *bdb, unsigned long count)
 void range_db(TCBDB *bdb, unsigned long count)
 {
 	TCLIST *list;
-	const int batch_count = 10;
-	char *key, *value;
+	const int batch_count = 1000;
 	char start_key[20];
 	char end_key[20];
 
 	sprintf(start_key, "0x");
-	sprintf(end_key, "0xf");
+	sprintf(end_key, "0y");
 
-	while ((list = tcbdbrange2(bdb, start_key, true, end_key, true, batch_count)) != NULL) {
-		while ((value = tclistpop2(list)) != NULL) {
+	while ((list = tcbdbrange2(bdb, start_key, false, end_key, false,
+				batch_count)) != NULL) {
+		char *key, *value;
+		int num = tclistnum(list);
+
+		if (num == 0) {
+			tclistdel(list);
+			break;
+		}
+		snprintf(start_key, sizeof(start_key), "%s",
+			tclistval2(list, num - 1));
+
+		while ((key = tclistshift2(list)) != NULL) {
+			value = tcbdbget2(bdb, key);
+			read_value(value);
+
+			free(key);
 			free(value);
 		}
 		tclistdel(list);
@@ -131,14 +160,13 @@ void range_db(TCBDB *bdb, unsigned long count)
 }
 
 static unsigned long count = 100000;
-static int value_length = 1000;
-static int batch_count = 10;
+static int value_length = 100;
 
 /*
- * 'p': populate db
- * 'g': get
- * 'c': cursor
- * 'r': range
+ * 'p': populate database
+ * 'g': get from database
+ * 'c': cursor get from database
+ * 'r': range get from database
  */
 static int command = 'p';
 
@@ -155,11 +183,6 @@ static void parse_options(int argc, char **argv)
 			value_length = atoi(optarg);
 			if (value_length <= 0)
 				die("invalid value length");
-			break;
-		case 'b':
-			batch_count = atoi(optarg);
-			if (batch_count <= 0)
-				die("invalid batch count");
 			break;
 		case 'p':
 		case 'g':
