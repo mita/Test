@@ -68,10 +68,10 @@ static void populate_db(TCBDB *bdb, unsigned long count, int value_length)
 		}
 
 		/* put noises */
-		sprintf(key, "/x%016lu", i);
+		sprintf(key, "0w%016lu", i);
 		tcbdbput2(bdb, key, value);
 
-		sprintf(key, "1x%016lu", i);
+		sprintf(key, "0y%016lu", i);
 		tcbdbput2(bdb, key, value);
 	}
 	free(value);
@@ -105,15 +105,12 @@ static void cursor_db(TCBDB *bdb, unsigned long count)
 {
 	BDBCUR *cur;
 	char *key, *value;
-	char key_prefix[20];
-
-	sprintf(key_prefix, "%s", "0x");
 
 	cur = tcbdbcurnew(bdb);
-	tcbdbcurjump2(cur, key_prefix);
+	tcbdbcurjump2(cur, "0x");
 
 	while ((key = tcbdbcurkey2(cur)) != NULL) {
-		if (strncmp(key, key_prefix, 2) != 0)
+		if (strncmp(key, "0x", 2) != 0)
 			break;
 
 		value = tcbdbcurval2(cur);
@@ -159,7 +156,7 @@ void range_db(TCBDB *bdb, unsigned long count)
 	}
 }
 
-static unsigned long count = 100000;
+static unsigned long count = 10000000;
 static int value_length = 100;
 
 /*
