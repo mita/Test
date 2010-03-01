@@ -39,6 +39,7 @@ static DB *open_db(void)
 		return NULL;
 	}
 	db->set_errfile(db, stderr);
+	db->set_flags(db, DB_TXN_NOSYNC);
 
 	ret = db->open(db, NULL, "casket.db", NULL, DB_BTREE, DB_CREATE, 0664);
 	if (ret) {
