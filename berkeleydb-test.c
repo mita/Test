@@ -31,15 +31,22 @@ static void *xmalloc(size_t size)
 static DB *open_db(void)
 {
 	DB *db;
+	DB_ENV *env;
 	int ret;
 
-	ret = db_create(&db, NULL, 0);
+	ret = db_env_create(&env, 0);
+	if (ret) {
+		fprintf(stderr, "db_env_create: %s\n", db_strerror(ret));
+		return NULL;
+	}
+	env->set_flags(env, DB_TXN_NOSYNC, 1);
+
+	ret = db_create(&db, env, 0);
 	if (ret) {
 		fprintf(stderr, "db_create: %s\n", db_strerror(ret));
 		return NULL;
 	}
 	db->set_errfile(db, stderr);
-	db->set_flags(db, DB_TXN_NOSYNC);
 
 	ret = db->open(db, NULL, "casket.db", NULL, DB_BTREE, DB_CREATE, 0664);
 	if (ret) {
