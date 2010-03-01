@@ -28,9 +28,8 @@ static void *xmalloc(size_t size)
 	return ptr;
 }
 
-static DB *open_db(void)
+static DB_ENV *init_env(void)
 {
-	DB *db;
 	DB_ENV *env;
 	int ret;
 
@@ -40,15 +39,43 @@ static DB *open_db(void)
 		return NULL;
 	}
 	env->set_flags(env, DB_TXN_NOSYNC, 1);
+	env->set_errfile(env, stderr);
+
+	ret = env->open(env, "casket", DB_CREATE, 0);
+	if (ret) {
+		env->err(env, ret, "env->open");
+		env->close(env, 0);
+		return NULL;
+	}
+	return env;
+}
+
+static void exit_env(DB_ENV *env)
+{
+	if (env)
+		env->close(env, 0);
+}
+
+static DB *open_db(DB_ENV *env)
+{
+	DB *db;
+	int ret;
+	char dbname[200];
 
 	ret = db_create(&db, env, 0);
 	if (ret) {
-		fprintf(stderr, "db_create: %s\n", db_strerror(ret));
+		env->err(env, ret, "db_create");
 		return NULL;
 	}
 	db->set_errfile(db, stderr);
 
-	ret = db->open(db, NULL, "casket.db", NULL, DB_BTREE, DB_CREATE, 0664);
+	if (env) {
+		snprintf(dbname, sizeof(dbname), "casket.db");
+	} else {
+		snprintf(dbname, sizeof(dbname), "casket/casket.db");
+	}
+
+	ret = db->open(db, NULL, dbname, NULL, DB_BTREE, DB_CREATE, 0664);
 	if (ret) {
 		db->err(db, ret, "open");
 		return NULL;
@@ -172,7 +199,7 @@ static void cursor_db(DB *db, unsigned long count)
 
 static unsigned long count = 10000000;
 static int value_length = 100;
-
+static int use_env;
 /*
  * 'p': populate database
  * 'g': get from database
@@ -184,7 +211,7 @@ static void parse_options(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "n:l:b:pgc")) != -1) {
+	while ((c = getopt(argc, argv, "n:l:b:epgc")) != -1) {
 		switch (c) {
 		case 'n':
 			count = atol(optarg);
@@ -194,7 +221,12 @@ static void parse_options(int argc, char **argv)
 			if (value_length <= 0)
 				die("invalid value length");
 			break;
+		case 'e':
+			use_env = 1;
+			break;
 		case 'p':
+			use_env = 1;
+			command = c;
 		case 'g':
 		case 'c':
 			command = c;
@@ -207,10 +239,13 @@ static void parse_options(int argc, char **argv)
 
 int main(int argc, char **argv){
 	DB *db;
+	DB_ENV *env = NULL;
 
 	parse_options(argc, argv);
 
-	db = open_db();
+	if (use_env)
+		env = init_env();
+	db = open_db(env);
 
 	switch (command) {
 	case 'p':
@@ -224,6 +259,7 @@ int main(int argc, char **argv){
 		break;
 	}
 	close_db(db);
+	exit_env(env);
 
 	return 0;
 }
