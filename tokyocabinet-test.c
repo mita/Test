@@ -171,7 +171,7 @@ static void parse_options(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "n:l:b:pgcr")) != -1) {
+	while ((c = getopt(argc, argv, "n:l:pgcr")) != -1) {
 		switch (c) {
 		case 'n':
 			count = atol(optarg);
