@@ -63,6 +63,36 @@ static void get_db(TCRDB *rdb, unsigned long count)
 	}
 }
 
+static void get3_db(TCRDB *rdb, unsigned long count)
+{
+	unsigned long index = 0;
+
+	while (index < count) {
+		int i;
+		const char *key;
+		int batch_count = (count - index < 1000) ? : 1000;
+		TCMAP *map = tcmapnew();
+
+		for (i = 0; i < batch_count; i++) {
+			char key[20];
+
+			sprintf(key, "0x%016lu", index);
+			tcmapput2(map, key, "");
+			index++;
+		}
+		if (!tcrdbget3(rdb, map)) {
+			int ecode = tcrdbecode(rdb);
+			fprintf(stderr, "get3 error: %s\n", tcrdberrmsg(ecode));
+		}
+		tcmapiterinit(map);
+		while ((key = tcmapiternext2(map)) != NULL) {
+			const char *value = tcmapiterval2(key);
+			read_value(value);
+		}
+		tcmapdel(map);
+	}
+}
+
 static void iter_get_db(TCRDB *rdb, unsigned long count)
 {
 	char *key, *value;
@@ -98,6 +128,23 @@ void fwmkeys_db(TCRDB *rdb, unsigned long count)
 	tclistdel(list);
 }
 
+void fwmkeys_get_db(TCRDB *rdb, unsigned long count)
+{
+	TCLIST *list;
+	char *key;
+
+	list = tcrdbfwmkeys2(rdb, "0x", -1);
+
+	while ((key = tclistshift2(list)) != NULL) {
+		char *value = tcrdbget2(rdb, key);
+
+		read_value(value);
+		free(key);
+		free(value);
+	}
+	tclistdel(list);
+}
+
 void fwmkeys_get3_db(TCRDB *rdb, unsigned long count)
 {
 	TCLIST *list;
@@ -130,29 +177,13 @@ void fwmkeys_get3_db(TCRDB *rdb, unsigned long count)
 	tclistdel(list);
 }
 
-void fwmkeys_get_db(TCRDB *rdb, unsigned long count)
-{
-	TCLIST *list;
-	char *key;
-
-	list = tcrdbfwmkeys2(rdb, "0x", -1);
-
-	while ((key = tclistshift2(list)) != NULL) {
-		char *value = tcrdbget2(rdb, key);
-
-		read_value(value);
-		free(key);
-		free(value);
-	}
-	tclistdel(list);
-}
-
 static unsigned long count = 10000000;
 static int value_length = 100;
 static char *host = "localhost:1978";
 
 /*
  * 'g': get from database
+ * 'G': get3 from database
  * 'i': iter get from database
  * 'k': fwmkeys
  * 'f': fwmkeys and get from database
@@ -164,7 +195,7 @@ static void parse_options(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "n:l:s:gikfF")) != -1) {
+	while ((c = getopt(argc, argv, "n:l:s:gGikfF")) != -1) {
 		switch (c) {
 		case 'n':
 			count = atol(optarg);
@@ -178,6 +209,7 @@ static void parse_options(int argc, char **argv)
 			host = optarg;
 			break;
 		case 'g':
+		case 'G':
 		case 'i':
 		case 'k':
 		case 'f':
@@ -200,6 +232,9 @@ int main(int argc, char **argv){
 	switch (command) {
 	case 'g':
 		get_db(rdb, count);
+		break;
+	case 'G':
+		get3_db(rdb, count);
 		break;
 	case 'i':
 		iter_get_db(rdb, count);
