@@ -52,12 +52,7 @@ static void get_db(TCRDB *rdb, unsigned long count)
 		char *value;
 
 		sprintf(key, "0x%016lu", i);
-
 		value = tcrdbget2(rdb, key);
-		if (!value) {
-			int ecode = tcrdbecode(rdb);
-			fprintf(stderr, "get error: %s\n", tcrdberrmsg(ecode));
-		}
 		read_value(value);
 		free(value);
 	}
@@ -108,12 +103,7 @@ static void iter_get_db(TCRDB *rdb, unsigned long count)
 			continue;
 
 		value = tcrdbget2(rdb, key);
-		if (!value) {
-			int ecode = tcrdbecode(rdb);
-			fprintf(stderr, "get error: %s\n", tcrdberrmsg(ecode));
-		}
 		read_value(value);
-
 		free(key);
 		free(value);
 	}
@@ -136,8 +126,9 @@ void fwmkeys_get_db(TCRDB *rdb, unsigned long count)
 	list = tcrdbfwmkeys2(rdb, "0x", -1);
 
 	while ((key = tclistshift2(list)) != NULL) {
-		char *value = tcrdbget2(rdb, key);
+		char *value;
 
+		value = tcrdbget2(rdb, key);
 		read_value(value);
 		free(key);
 		free(value);
