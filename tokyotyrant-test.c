@@ -39,7 +39,7 @@ static void close_db(TCRDB *rdb)
 	tcrdbdel(rdb);
 }
 
-static void read_value(char *value)
+static void read_value(const char *value)
 {
 }
 
@@ -63,7 +63,7 @@ static void get_db(TCRDB *rdb, unsigned long count)
 	}
 }
 
-static void cursor_db(TCRDB *rdb, unsigned long count)
+static void iter_get_db(TCRDB *rdb, unsigned long count)
 {
 	char *key, *value;
 
@@ -78,6 +78,10 @@ static void cursor_db(TCRDB *rdb, unsigned long count)
 			continue;
 
 		value = tcrdbget2(rdb, key);
+		if (!value) {
+			int ecode = tcrdbecode(rdb);
+			fprintf(stderr, "get error: %s\n", tcrdberrmsg(ecode));
+		}
 		read_value(value);
 
 		free(key);
@@ -85,18 +89,58 @@ static void cursor_db(TCRDB *rdb, unsigned long count)
 	}
 }
 
-void range_db(TCRDB *rdb, unsigned long count)
+void fwmkeys_db(TCRDB *rdb, unsigned long count)
 {
 	TCLIST *list;
-	char *key, *value;
-	const int batch_count = -1;
 
-	list = tcrdbfwmkeys2(rdb, "0x", batch_count);
+	list = tcrdbfwmkeys2(rdb, "0x", -1);
+
+	tclistdel(list);
+}
+
+void fwmkeys_get3_db(TCRDB *rdb, unsigned long count)
+{
+	TCLIST *list;
+	const int batch_count = 1000;
+
+	list = tcrdbfwmkeys2(rdb, "0x", -1);
+
+	while (tclistnum(list) > 0) {
+		int i;
+		const char *key;
+		TCMAP *map = tcmapnew();
+
+		for (i = 0; i < batch_count; i++) {
+			key = tclistshift2(list);
+			if (!key)
+				break;
+			tcmapput2(map, key, "");
+		}
+		if (!tcrdbget3(rdb, map)) {
+			int ecode = tcrdbecode(rdb);
+			fprintf(stderr, "get3 error: %s\n", tcrdberrmsg(ecode));
+		}
+		tcmapiterinit(map);
+		while ((key = tcmapiternext2(map)) != NULL) {
+			const char *value = tcmapiterval2(key);
+			read_value(value);
+		}
+		tcmapdel(map);
+	}
+	tclistdel(list);
+}
+
+void fwmkeys_get_db(TCRDB *rdb, unsigned long count)
+{
+	TCLIST *list;
+	char *key;
+
+	list = tcrdbfwmkeys2(rdb, "0x", -1);
 
 	while ((key = tclistshift2(list)) != NULL) {
-		value = tcrdbget2(rdb, key);
-		read_value(value);
+		char *value = tcrdbget2(rdb, key);
 
+		read_value(value);
 		free(key);
 		free(value);
 	}
@@ -109,8 +153,10 @@ static char *host = "localhost:1978";
 
 /*
  * 'g': get from database
- * 'c': cursor get from database
- * 'r': range get from database
+ * 'i': iter get from database
+ * 'k': fwmkeys
+ * 'f': fwmkeys and get from database
+ * 'F': fwmkeys and get3 from database
  */
 static int command = 'g';
 
@@ -118,7 +164,7 @@ static void parse_options(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "n:l:s:gcr")) != -1) {
+	while ((c = getopt(argc, argv, "n:l:s:gikfF")) != -1) {
 		switch (c) {
 		case 'n':
 			count = atol(optarg);
@@ -132,8 +178,10 @@ static void parse_options(int argc, char **argv)
 			host = optarg;
 			break;
 		case 'g':
-		case 'c':
-		case 'r':
+		case 'i':
+		case 'k':
+		case 'f':
+		case 'F':
 			command = c;
 			break;
 		default:
@@ -153,11 +201,16 @@ int main(int argc, char **argv){
 	case 'g':
 		get_db(rdb, count);
 		break;
-	case 'c':
-		cursor_db(rdb, count);
+	case 'i':
+		iter_get_db(rdb, count);
 		break;
-	case 'r':
-		range_db(rdb, count);
+	case 'k':
+		fwmkeys_db(rdb, count);
+		break;
+	case 'f':
+		fwmkeys_get_db(rdb, count);
+	case 'F':
+		fwmkeys_get3_db(rdb, count);
 		break;
 	}
 	close_db(rdb);
