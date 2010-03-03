@@ -1,8 +1,6 @@
 #include <db.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
 #include <getopt.h>
@@ -38,10 +36,20 @@ static DB_ENV *init_env(void)
 		fprintf(stderr, "db_env_create: %s\n", db_strerror(ret));
 		return NULL;
 	}
+	env->set_flags(env, DB_AUTO_COMMIT, 0);
+	env->set_flags(env, DB_DIRECT_DB, 0);
+	env->set_flags(env, DB_NOLOCKING, 1);
+	env->set_flags(env, DB_NOMMAP, 0);
+	env->set_flags(env, DB_DSYNC_DB, 0);
+	env->set_flags(env, DB_TXN_WRITE_NOSYNC, 1);
 	env->set_flags(env, DB_TXN_NOSYNC, 1);
+
+	env->set_mp_mmapsize(env, 10UL * 1024 * 1024 * 1024);
+	env->set_cachesize(env, 10, 0, 1);
+
 	env->set_errfile(env, stderr);
 
-	ret = env->open(env, "casket", DB_CREATE, 0);
+	ret = env->open(env, "casket", DB_CREATE | DB_INIT_MPOOL, 0);
 	if (ret) {
 		env->err(env, ret, "env->open");
 		env->close(env, 0);
@@ -237,7 +245,8 @@ static void parse_options(int argc, char **argv)
 	}
 }
 
-int main(int argc, char **argv){
+int main(int argc, char **argv)
+{
 	DB *db;
 	DB_ENV *env = NULL;
 
