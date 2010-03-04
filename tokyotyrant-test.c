@@ -58,14 +58,28 @@ static void get_db(TCRDB *rdb, unsigned long count)
 	}
 }
 
+static void mget(TCRDB *rdb, TCMAP *map)
+{
+	const char *key;
+
+	if (!tcrdbget3(rdb, map)) {
+		int ecode = tcrdbecode(rdb);
+		fprintf(stderr, "get3 error: %s\n", tcrdberrmsg(ecode));
+	}
+	tcmapiterinit(map);
+	while ((key = tcmapiternext2(map)) != NULL) {
+		const char *value = tcmapiterval2(key);
+		read_value(value);
+	}
+}
+
 static void get3_db(TCRDB *rdb, unsigned long count)
 {
 	unsigned long index = 0;
 
 	while (index < count) {
 		int i;
-		const char *key;
-		int batch_count = (count - index < 1000) ? : 1000;
+		const int batch_count = (count - index < 1000) ? : 1000;
 		TCMAP *map = tcmapnew();
 
 		for (i = 0; i < batch_count; i++) {
@@ -75,22 +89,56 @@ static void get3_db(TCRDB *rdb, unsigned long count)
 			tcmapput2(map, key, "");
 			index++;
 		}
-		if (!tcrdbget3(rdb, map)) {
-			int ecode = tcrdbecode(rdb);
-			fprintf(stderr, "get3 error: %s\n", tcrdberrmsg(ecode));
-		}
-		tcmapiterinit(map);
-		while ((key = tcmapiternext2(map)) != NULL) {
-			const char *value = tcmapiterval2(key);
-			read_value(value);
-		}
+		mget(rdb, map);
 		tcmapdel(map);
+	}
+}
+
+static void iter_db(TCRDB *rdb, unsigned long count)
+{
+	char *key;
+
+	if (!tcrdbiterinit(rdb)) {
+		int ecode = tcrdbecode(rdb);
+		fprintf(stderr, "iter init error: %s\n", tcrdberrmsg(ecode));
+		return;
+	}
+
+	while ((key = tcrdbiternext2(rdb)) != NULL) {
+		if (strncmp(key, "0x", 2) != 0)
+			continue;
+		free(key);
 	}
 }
 
 static void iter_get_db(TCRDB *rdb, unsigned long count)
 {
-	char *key, *value;
+	char *key;
+
+	if (!tcrdbiterinit(rdb)) {
+		int ecode = tcrdbecode(rdb);
+		fprintf(stderr, "iter init error: %s\n", tcrdberrmsg(ecode));
+		return;
+	}
+
+	while ((key = tcrdbiternext2(rdb)) != NULL) {
+		char *value;
+
+		if (strncmp(key, "0x", 2) != 0)
+			continue;
+
+		value = tcrdbget2(rdb, key);
+		read_value(value);
+		free(key);
+		free(value);
+	}
+}
+
+static void iter_get3_db(TCRDB *rdb, unsigned long count)
+{
+	char *key;
+	const int batch_count = 1000;
+	TCMAP *map = tcmapnew();
 
 	if (!tcrdbiterinit(rdb)) {
 		int ecode = tcrdbecode(rdb);
@@ -102,11 +150,18 @@ static void iter_get_db(TCRDB *rdb, unsigned long count)
 		if (strncmp(key, "0x", 2) != 0)
 			continue;
 
-		value = tcrdbget2(rdb, key);
-		read_value(value);
+		tcmapput2(map, key, "");
 		free(key);
-		free(value);
+
+		if (tcmaprnum(map) < batch_count)
+			continue;
+		mget(rdb, map);
+		tcmapdel(map);
+		map = tcmapnew();
 	}
+	if (tcmaprnum(map) > 0)
+		mget(rdb, map);
+	tcmapdel(map);
 }
 
 void fwmkeys_db(TCRDB *rdb, unsigned long count)
@@ -154,15 +209,7 @@ void fwmkeys_get3_db(TCRDB *rdb, unsigned long count)
 				break;
 			tcmapput2(map, key, "");
 		}
-		if (!tcrdbget3(rdb, map)) {
-			int ecode = tcrdbecode(rdb);
-			fprintf(stderr, "get3 error: %s\n", tcrdberrmsg(ecode));
-		}
-		tcmapiterinit(map);
-		while ((key = tcmapiternext2(map)) != NULL) {
-			const char *value = tcmapiterval2(key);
-			read_value(value);
-		}
+		mget(rdb, map);
 		tcmapdel(map);
 	}
 	tclistdel(list);
@@ -175,8 +222,10 @@ static char *host = "localhost:1978";
 /*
  * 'g': get from database
  * 'G': get3 from database
- * 'i': iter get from database
  * 'k': fwmkeys
+ * 'K': iter
+ * 'i': iter get from database
+ * 'I': iter get3 from database
  * 'f': fwmkeys and get from database
  * 'F': fwmkeys and get3 from database
  */
@@ -186,7 +235,7 @@ static void parse_options(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "n:l:s:gGikfF")) != -1) {
+	while ((c = getopt(argc, argv, "n:l:s:gGiIkKfF")) != -1) {
 		switch (c) {
 		case 'n':
 			count = atol(optarg);
@@ -202,7 +251,9 @@ static void parse_options(int argc, char **argv)
 		case 'g':
 		case 'G':
 		case 'i':
+		case 'I':
 		case 'k':
+		case 'K':
 		case 'f':
 		case 'F':
 			command = c;
@@ -230,11 +281,18 @@ int main(int argc, char **argv){
 	case 'i':
 		iter_get_db(rdb, count);
 		break;
+	case 'I':
+		iter_get3_db(rdb, count);
+		break;
 	case 'k':
 		fwmkeys_db(rdb, count);
 		break;
+	case 'K':
+		iter_db(rdb, count);
+		break;
 	case 'f':
 		fwmkeys_get_db(rdb, count);
+		break;
 	case 'F':
 		fwmkeys_get3_db(rdb, count);
 		break;
