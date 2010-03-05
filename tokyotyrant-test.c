@@ -143,8 +143,10 @@ static void iter_db(TCRDB *rdb, unsigned long count)
 	}
 
 	while ((key = tcrdbiternext2(rdb)) != NULL) {
-		if (strncmp(key, "0x", 2) != 0)
+		if (strncmp(key, "0x", 2) != 0) {
+			free(key);
 			continue;
+		}
 		free(key);
 	}
 }
@@ -162,8 +164,10 @@ static void iter_get_db(TCRDB *rdb, unsigned long count)
 	while ((key = tcrdbiternext2(rdb)) != NULL) {
 		char *value;
 
-		if (strncmp(key, "0x", 2) != 0)
+		if (strncmp(key, "0x", 2) != 0) {
+			free(key);
 			continue;
+		}
 
 		value = tcrdbget2(rdb, key);
 		read_value(value);
@@ -185,9 +189,10 @@ static void iter_get3_db(TCRDB *rdb, unsigned long count)
 	}
 
 	while ((key = tcrdbiternext2(rdb)) != NULL) {
-		if (strncmp(key, "0x", 2) != 0)
+		if (strncmp(key, "0x", 2) != 0) {
+			free(key);
 			continue;
-
+		}
 		tcmapput2(map, key, "");
 		free(key);
 

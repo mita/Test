@@ -110,8 +110,10 @@ static void cursor_db(TCBDB *bdb, unsigned long count)
 	tcbdbcurjump2(cur, "0x");
 
 	while ((key = tcbdbcurkey2(cur)) != NULL) {
-		if (strncmp(key, "0x", 2) != 0)
+		if (strncmp(key, "0x", 2) != 0) {
+			free(key);
 			break;
+		}
 
 		value = tcbdbcurval2(cur);
 		read_value(value);
