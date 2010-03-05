@@ -17,6 +17,17 @@ static void die(const char *err, ...)
 	va_end(params);
 }
 
+static void *xmalloc(size_t size)
+{
+	void *ptr;
+
+	ptr = malloc(size);
+	if (!ptr)
+		die("malloc: out of memory");
+
+	return ptr;
+}
+
 static TCRDB *open_db(char *host)
 {
 	TCRDB *rdb;
@@ -41,6 +52,33 @@ static void close_db(TCRDB *rdb)
 
 static void read_value(const char *value)
 {
+}
+
+static void populate_db(TCRDB *rdb, unsigned long count, int value_length)
+{
+	unsigned long i;
+	char key[20];
+	char *value = xmalloc(value_length);
+
+	memset(value, '*', value_length);
+	value[value_length - 1] = 0;
+
+	for (i = 0; i < count; i++) {
+		sprintf(key, "0x%016lu", i);
+
+		if (!tcrdbput2(rdb, key, value)) {
+			int ecode = tcrdbecode(rdb);
+			fprintf(stderr, "put error: %s\n", tcrdberrmsg(ecode));
+		}
+
+		/* put noises */
+		sprintf(key, "0w%016lu", i);
+		tcrdbput2(rdb, key, value);
+
+		sprintf(key, "0y%016lu", i);
+		tcrdbput2(rdb, key, value);
+	}
+	free(value);
 }
 
 static void get_db(TCRDB *rdb, unsigned long count)
@@ -220,6 +258,7 @@ static int value_length = 100;
 static char *host = "localhost:1978";
 
 /*
+ * 'p': populate database
  * 'g': get from database
  * 'G': get3 from database
  * 'k': fwmkeys
@@ -235,7 +274,7 @@ static void parse_options(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "n:l:s:gGiIkKfF")) != -1) {
+	while ((c = getopt(argc, argv, "n:l:s:pgGiIkKfF")) != -1) {
 		switch (c) {
 		case 'n':
 			count = atol(optarg);
@@ -248,6 +287,7 @@ static void parse_options(int argc, char **argv)
 		case 's':
 			host = optarg;
 			break;
+		case 'p':
 		case 'g':
 		case 'G':
 		case 'i':
@@ -272,6 +312,9 @@ int main(int argc, char **argv){
 	rdb = open_db(host);
 
 	switch (command) {
+	case 'p':
+		populate_db(rdb, count, value_length);
+		break;
 	case 'g':
 		get_db(rdb, count);
 		break;
