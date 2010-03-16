@@ -13,8 +13,17 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Random;
 import java.util.List;
+import java.util.ArrayList;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+
 import sun.misc.BASE64Encoder;
 
 class ChunkFlags {
@@ -140,9 +149,29 @@ class ChunkServerRequest {
 	}
 }
 
+class StObject {
+	public byte[] name;
+	public String time_mod;
+	public String etag;
+	public long size;
+	public String owner;
+
+	public StObject() {
+	}
+
+	public String toString() {
+		return new String(name);
+	}
+};
+
 class StKeylist {
 	public String name;
-	public List<byte[]> contents;
+	public List<StObject> contents;
+
+	public StKeylist(String name, List<StObject> contents) {
+		this.name = name;
+		this.contents = contents;
+	}
 }
 
 public class StClient {
@@ -262,7 +291,7 @@ public class StClient {
 			out.write(dst.array(), pos, dst.remaining());
 			dst.position(dst.limit());
 
-			return dst.position();
+			return dst.position() - pos;
 		}
 
 		public void close() throws IOException {
@@ -281,9 +310,10 @@ public class StClient {
 	public byte[] getInline(byte[] key) throws Exception {
 		InlineWritable buffer = new InlineWritable();
 
-		get(key, buffer);
+		if (get(key, buffer))
+			return buffer.toByteArray();
 
-		return buffer.toByteArray();
+		return null;
 	}
 
 	public boolean del(byte[] key) throws Exception {
@@ -314,6 +344,76 @@ public class StClient {
 		return true;
 	}
 
+	private String getFirstChildValue(Element child) {
+		return child.getFirstChild().getNodeValue();
+	}
+
+	private long parseContentsSize(Element size) {
+		return Long.parseLong(size.getFirstChild().getNodeValue());
+	}
+
+	private byte[] parseContentsName(Element name) throws Exception {
+		return name.getFirstChild().getNodeValue().getBytes("UTF-8");
+	}
+
+	private StObject parseContents(Element contents) throws Exception {
+		NodeList children = contents.getChildNodes();
+		StObject obj = new StObject();
+
+		for (int i = 0; i < children.getLength(); i++) {
+			if (!(children.item(i) instanceof Element))
+				continue;
+			Element child = (Element)children.item(i);
+
+			if (child.getTagName().equals("Name"))
+				obj.name = parseContentsName(child);
+			else if (child.getTagName().equals("LastModified"))
+				obj.time_mod = getFirstChildValue(child);
+			else if (child.getTagName().equals("ETag"))
+				obj.etag = getFirstChildValue(child);
+			else if (child.getTagName().equals("Size"))
+				obj.size = parseContentsSize(child);
+			else if (child.getTagName().equals("Owner"))
+				obj.owner = getFirstChildValue(child);
+		}
+		return obj;
+	}
+
+	private StKeylist parseListVolumeResult(Element listVolumeResult)
+			throws Exception {
+		NodeList children = listVolumeResult.getChildNodes();
+		String name = null;
+		List<StObject> contents = new ArrayList<StObject>();
+
+		for (int i = 0; i < children.getLength(); i++) {
+			if (!(children.item(i) instanceof Element))
+				continue;
+			Element child = (Element)children.item(i);
+
+			if (child.getTagName().equals("Name"))
+				name = getFirstChildValue(child);
+			else if (child.getTagName().equals("Contents"))
+				contents.add(parseContents(child));
+		}
+		return new StKeylist(name, contents);
+	}
+
+	private StKeylist parseXML(InputStream in) throws Exception {
+		DocumentBuilderFactory factory =
+			DocumentBuilderFactory.newInstance();
+
+		factory.setIgnoringComments(true);
+
+		DocumentBuilder builder = factory.newDocumentBuilder();
+		Document doc = builder.parse(in);
+		Element root = doc.getDocumentElement();
+
+		if (root.getTagName().equals("ListVolumeResult"))
+			return parseListVolumeResult(root);
+
+		return null;
+	}
+
 	public StKeylist keys() throws Exception {
 		ChunkServerRequest req =
 			new ChunkServerRequest(ChunkServerRequest.CHO_LIST);
@@ -327,9 +427,18 @@ public class StClient {
 
 		long len = resp.data_len;
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		// ...
+		ByteBuffer buffer = ByteBuffer.allocate(4096);
 
-		return null;
+		while (len > 0) {
+			channel.read(buffer);
+			buffer.flip();
+			out.write(buffer.array(), buffer.position(),
+					buffer.remaining());
+			len -= buffer.remaining();
+			buffer.clear();
+		}
+
+		return parseXML(new ByteArrayInputStream(out.toByteArray()));
 	}
 
 	public boolean put(byte[] key, ReadableByteChannel readable,
@@ -403,6 +512,11 @@ public class StClient {
 		client.ping();
 		client.del(key);
 		client.putInline(key, value, ChunkFlags.CHF_SYNC);
-		value = client.getInline(key);
+
+		StKeylist keylist = client.keys();
+		for (StObject obj: keylist.contents) {
+			System.out.println(new String(obj.name));
+			System.out.println(new String(client.getInline(key)));
+		}
 	}
 }
