@@ -14,6 +14,7 @@ import java.nio.ByteOrder;
 import java.util.Random;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -46,6 +47,28 @@ class ChunkErrCode {
 	public static final byte Busy = 9;
 }
 
+class ChunkUtil {
+	public static final byte CHUNKD_MAGIC[] =
+		{ 'C', 'H', 'U', 'N', 'K', 'D', 'v', '1' };
+
+	public static boolean checkMagic(byte[] magic) {
+		return Arrays.equals(CHUNKD_MAGIC, magic);
+	}
+
+	public static byte[] magic() {
+		return Arrays.copyOf(CHUNKD_MAGIC, CHUNKD_MAGIC.length);
+	}
+
+	private static final int CHD_KEY_SZ = 1024;
+
+	public static boolean keyValid(byte key[]) {
+		if (key.length < 1 || key.length > CHD_KEY_SZ)
+			return false;
+
+		return true;
+	}
+}
+
 class ChunkServerResponse {
 	static final int CHD_MAGIC_SZ = 8;
 	static final int CHD_CSUM_SZ = 64;
@@ -60,13 +83,14 @@ class ChunkServerResponse {
 	public ChunkServerResponse(ByteBuffer buffer) {
 		buffer.order(ByteOrder.LITTLE_ENDIAN);
 		buffer.get(magic);
-		// check magic
-
 		resp_code = buffer.get();
 		buffer.get(rsv1);
 		nonce = buffer.getInt();
 		data_len = buffer.getLong();
 		buffer.get(checksum);
+
+		if (ChunkUtil.checkMagic(magic))
+			; // throw Exeption;
 	}
 
 	public static final int length = 88;
@@ -75,7 +99,7 @@ class ChunkServerResponse {
 class ChunkServerRequest {
 	static final int CHD_SIG_SZ = 64;
 
-	private byte magic[] = { 'C', 'H', 'U', 'N', 'K', 'D', 'v', '1' };
+	private byte magic[] = ChunkUtil.magic();
 	public byte op;
 	public byte flags;
 	private short key_len;
@@ -103,10 +127,11 @@ class ChunkServerRequest {
 	}
 
 	public void setKey(byte[] key) {
-		this.key = new byte[key.length];
-		// check key length
-		this.key_len = (short)key.length;
+		if (!ChunkUtil.keyValid(key))
+			; // throw Exception;
 
+		this.key = new byte[key.length];
+		this.key_len = (short)key.length;
 		System.arraycopy(key, 0, this.key, 0, key.length);
 	}
 
@@ -507,11 +532,13 @@ public class StClient {
 		byte[] tableBytes = "table".getBytes("UTF-8");
 		byte[] key = "key".getBytes("UTF-8");
 		byte[] value = "value".getBytes("UTF-8");
+		boolean ret;
 
 		client.tableOpen(tableBytes, ChunkFlags.CHF_TBL_CREAT);
 		client.ping();
 		client.del(key);
-		client.putInline(key, value, ChunkFlags.CHF_SYNC);
+
+		ret = client.putInline(key, value, ChunkFlags.CHF_SYNC);
 
 		StKeylist keylist = client.keys();
 		for (StObject obj: keylist.contents) {
