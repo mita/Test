@@ -6,6 +6,7 @@ mtd_nandecctest
 test_rodata
 testmmiotrace
 tcrypt
+kmemleak-test
 "
 
 for m in $MODULES; do
