@@ -9,6 +9,7 @@ tcrypt
 kmemleak-test
 raid6test
 dmatest
+ring_buffer_benchmark
 "
 
 for m in $MODULES; do
@@ -18,6 +19,9 @@ done
 modprobe rcutorture
 sleep 5 
 modprobe -r rcutorture
+
+make -C drivers/md/raid6test/
+./drivers/md/raid6test/raid6test
 
 (cd ~/scm/linux-2.6/scripts/rt-tester; ./check-all.sh)
 
