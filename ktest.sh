@@ -12,6 +12,9 @@ dmatest
 ring_buffer_benchmark
 "
 
+#
+# kernel modules
+#
 for m in $MODULES; do
 	modprobe $m
 done
@@ -20,11 +23,17 @@ modprobe rcutorture
 sleep 5 
 modprobe -r rcutorture
 
+(cd ~/scm/linux-2.6/scripts/rt-tester; ./check-all.sh)
+
+#
+# userspace tests
+#
 make -C drivers/md/raid6test/
 ./drivers/md/raid6test/raid6test
 
-(cd ~/scm/linux-2.6/scripts/rt-tester; ./check-all.sh)
-
+#
+# todo
+#
 cat << EOF > /dev/null
 test_suspend
 test_kprobes
@@ -34,7 +43,5 @@ kmemcheck/selftest
 atomic64_test
 trace_selftest
 drivers/net/sfc/selftest.c
-./drivers/md/raid6test/test.c
 Documentations
 EOF
-
