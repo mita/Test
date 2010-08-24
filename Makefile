@@ -42,13 +42,13 @@ berkeleydb-test: berkeleydb-test.c
 tokyotyrant-test: tokyotyrant-test.c
 	$(CC) $(CFLAGS) -o $@ $< -ltokyotyrant -ltokyocabinet
 
-tokyocabinettest: tokyocabinettest.c
+tokyocabinettest: tokyocabinettest.c testutil.h
 	$(CC) $(CFLAGS) -o $@ $< -ltokyocabinet
 
-berkeleydbtest: berkeleydbtest.c
+berkeleydbtest: berkeleydbtest.c testutil.h
 	$(CC) $(CFLAGS) -o $@ $< -ldb
 
-tokyotyranttest: tokyotyranttest.c
+tokyotyranttest: tokyotyranttest.c testutil.h
 	$(CC) $(CFLAGS) -o $@ $< -ltokyotyrant -ltokyocabinet
 
 clean:
