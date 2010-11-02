@@ -43,73 +43,54 @@ static void xpthread_join(pthread_t th)
 		die("pthread_join failed");
 }
 
+#define KEYGEN_KEY_SIZE sizeof("0x0000000000000000-0x0000000000000000")
+#define KEYGEN_PREFIX_SIZE (sizeof("0x0000000000000000-") - 1)
+
 struct keygen {
-	long seed;
-	char *(*next_key)(struct keygen *keygen);
-	void *data;
-};
-
-struct keygen_sequence {
-	char key[sizeof("0x0000000000000000-0x0000000000000000")];
-	unsigned long long counter;
-};
-
-static char *keygen_sequence_next_key(struct keygen *keygen)
-{
-	struct keygen_sequence *keygen_data = keygen->data;
-
-	sprintf(keygen_data->key, "0x%016llx-0x%016llx",
-			(unsigned long long) keygen->seed,
-			keygen_data->counter++);
-
-	return keygen_data->key;
-}
-
-static void keygen_sequence_init(struct keygen *keygen, long seed)
-{
-	struct keygen_sequence *keygen_data = xmalloc(sizeof(*keygen_data));
-
-	keygen->seed = seed;
-	keygen->next_key = keygen_sequence_next_key;
-	keygen->data = keygen_data;
-
-	keygen_data->counter = 0;
-}
-
-struct keygen_random {
-	char key[sizeof("0x0000000000000000-0x0000000000000000")];
+	unsigned int prefix;
+	char key[KEYGEN_KEY_SIZE];
+	unsigned int (*next)(unsigned int *state);
 	unsigned int seed;
 };
 
-static char *keygen_random_next_key(struct keygen *keygen)
+static unsigned int keygen_sequence_next(unsigned int *seed)
 {
-	struct keygen_random *keygen_data = keygen->data;
-	unsigned long long random;
-
-	random = rand_r(&keygen_data->seed);
-	random *= RAND_MAX;
-	random += rand_r(&keygen_data->seed);
-
-	sprintf(keygen_data->key, "0x%016llx-0x%016llx",
-			(unsigned long long)keygen->seed, random);
-
-	return keygen_data->key;
+	return (*seed)++;
 }
 
-static void keygen_random_init(struct keygen *keygen, long seed)
+static void keygen_sequence_init(struct keygen *keygen, unsigned int seed)
 {
-	struct keygen_random *keygen_data = xmalloc(sizeof(*keygen_data));
+	keygen->next = keygen_sequence_next;
+	keygen->seed = 0;
+}
 
+static unsigned int keygen_random_next(unsigned int *seed)
+{
+	return (unsigned int) rand_r(seed);
+}
+
+static void keygen_random_init(struct keygen *keygen, unsigned int seed)
+{
+	keygen->next = keygen_random_next;
 	keygen->seed = seed;
-	keygen->next_key = keygen_random_next_key;
-	keygen->data = keygen_data;
-
-	keygen_data->seed = seed;
 }
 
 static char *keygen_next_key(struct keygen *keygen)
 {
-	return keygen->next_key(keygen);
+	unsigned int next = keygen->next(&keygen->seed);
+
+	sprintf(keygen->key, "0x%016llx-0x%016llx",
+			(unsigned long long)keygen->prefix,
+			(unsigned long long)next);
+
+	return keygen->key;
+}
+
+static inline char *keygen_prefix(struct keygen *keygen, char *buf)
+{
+	sprintf(buf, "0x%016llx-", (unsigned long long)keygen->prefix);
+
+	return buf;
 }
 
 static const char *key_generator = "sequence";
@@ -119,22 +100,14 @@ static void keygen_set_generator(const char *generator)
 	key_generator = generator;
 }
 
-static void *keygen_alloc(long seed)
+static void keygen_init(struct keygen *keygen, unsigned int seed)
 {
-	struct keygen *keygen = xmalloc(sizeof(*keygen));
+	keygen->prefix = seed;
 
 	if (!strcmp(key_generator, "random"))
 		keygen_random_init(keygen, seed);
 	else
 		keygen_sequence_init(keygen, seed);
-
-	return keygen;
-}
-
-static void keygen_free(struct keygen *keygen)
-{
-	free(keygen->data);
-	free(keygen);
 }
 
 static unsigned long long tv_to_us(const struct timeval *tv)

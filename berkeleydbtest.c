@@ -164,9 +164,10 @@ static char *command = "";
 static char *path = "data";
 static int num = 5000000;
 static int vsiz = 100;
-static long seed;
+static unsigned int seed;
 static int batch = 1000;
 static int thnum = 1;
+static bool debug = false;
 
 static void parse_options(int argc, char **argv)
 {
@@ -182,7 +183,7 @@ static void parse_options(int argc, char **argv)
 		} else if (!strcmp(argv[i], "-vsiz")) {
 			vsiz = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-seed")) {
-			seed = atol(argv[++i]);
+			seed = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-batch")) {
 			batch = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-thnum")) {
@@ -191,13 +192,15 @@ static void parse_options(int argc, char **argv)
 				die("Invalid -thnum option");
 		} else if (!strcmp(argv[i], "-key")) {
 			keygen_set_generator(argv[++i]);
+		} else if (!strcmp(argv[i], "-debug")) {
+			debug = true;
 		} else {
 			die("Invalid command option");
 		}
 	}
 }
 
-#define KSIZ sizeof("0x0000000000000000-0x0000000000000000")
+#define KSIZ KEYGEN_KEY_SIZE
 
 static void db_put(DB *db, DBT *key, DBT *data, u_int32_t flags)
 {
@@ -217,13 +220,15 @@ retry:
 	}
 }
 
-static void putlist_test(DB *db, int num, int vsiz, long seed)
+static void putlist_test(DB *db, int num, int vsiz, unsigned int seed)
 {
-	struct keygen *keygen = keygen_alloc(seed);
+	struct keygen keygen;
 	char *value = xmalloc(vsiz);
 	DBT key, data;
 	void *ptrk, *ptrd;
 	int i;
+
+	keygen_init(&keygen, seed);
 
 	memset(&key, 0, sizeof(key));
 	memset(&data, 0, sizeof(data));
@@ -241,7 +246,7 @@ static void putlist_test(DB *db, int num, int vsiz, long seed)
 
 	for (i = 0; i < num; i++) {
 		DB_MULTIPLE_WRITE_NEXT(ptrk, &key,
-					keygen_next_key(keygen), KSIZ);
+					keygen_next_key(&keygen), KSIZ);
 		DB_MULTIPLE_WRITE_NEXT(ptrd, &data, value, vsiz);
 		if (ptrk == NULL || ptrd == NULL)
 			die("DB_MULTIPLE_WRITE_NEXT failed");
@@ -275,7 +280,6 @@ static void putlist_test(DB *db, int num, int vsiz, long seed)
 	}
 
 	free(value);
-	keygen_free(keygen);
 }
 
 static void db_del(DB *db, DBT *key, u_int32_t flags)
@@ -296,12 +300,14 @@ retry:
 	}
 }
 
-static void outlist_test(DB *db, int num, long seed)
+static void outlist_test(DB *db, int num, unsigned int seed)
 {
-	struct keygen *keygen = keygen_alloc(seed);
+	struct keygen keygen;
 	DBT key;
 	void *ptrk;
 	int i;
+
+	keygen_init(&keygen, seed);
 
 	memset(&key, 0, sizeof(key));
 
@@ -313,7 +319,7 @@ static void outlist_test(DB *db, int num, long seed)
 
 	for (i = 0; i < num; i++) {
 		DB_MULTIPLE_WRITE_NEXT(ptrk, &key,
-					keygen_next_key(keygen), KSIZ);
+					keygen_next_key(&keygen), KSIZ);
 		if (ptrk == NULL)
 			die("DB_MULTIPLE_WRITE_NEXT failed");
 
@@ -335,15 +341,13 @@ static void outlist_test(DB *db, int num, long seed)
 		db_del(db, &key, DB_MULTIPLE);
 		free(key.data);
 	}
-
-	keygen_free(keygen);
 }
 
 struct thread_data {
 	pthread_t tid;
 	pthread_barrier_t *barrier;
 	DB *db;
-	long seed;
+	unsigned int seed;
 	unsigned long long elapsed;
 };
 
@@ -352,7 +356,7 @@ static void *benchmark_thread(void *arg)
 	struct thread_data *data = arg;
 	unsigned long long start;
 	DB *db = data->db;
-	long seed = data->seed;
+	unsigned int seed = data->seed;
 
 	pthread_barrier_wait(data->barrier);
 
