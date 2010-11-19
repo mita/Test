@@ -1,13 +1,15 @@
 #include <tcutil.h>
 #include <tcrdb.h>
 #include <string.h>
-#include <stdio.h>
-#include <limits.h>
 #include "testutil.h"
 
-static TCRDB *open_db(char *host, int port)
+static bool debug = false;
+
+static void *open_db(struct benchmark_config *config)
 {
 	TCRDB *rdb;
+	const char *host = config->host;
+	int port = config->port;
 
 	rdb = tcrdbnew();
 
@@ -18,8 +20,10 @@ static TCRDB *open_db(char *host, int port)
 	return rdb;
 }
 
-static void close_db(TCRDB *rdb)
+static void close_db(void *db)
 {
+	TCRDB *rdb = db;
+
 	if (!tcrdbclose(rdb)){
 		int ecode = tcrdbecode(rdb);
 		die("close error: %s", tcrdberrmsg(ecode));
@@ -27,54 +31,9 @@ static void close_db(TCRDB *rdb)
 	tcrdbdel(rdb);
 }
 
-static char *command = "";
-static char *host = "localhost";
-static int port = 1978;
-static int num = 5000000;
-static int vsiz = 100;
-static unsigned int seed;
-static int batch = 1000;
-static int thnum = 1;
-static bool debug = false;
-static int share;
-
-static void parse_options(int argc, char **argv)
+static void put_test(void *db, int num, int vsiz, unsigned int seed)
 {
-	int i;
-
-	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "-command")) {
-			command = argv[++i];
-		} else if (!strcmp(argv[i], "-host")) {
-			host = argv[++i];
-		} else if (!strcmp(argv[i], "-port")) {
-			port = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-num")) {
-			num = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-vsiz")) {
-			vsiz = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-seed")) {
-			seed = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-batch")) {
-			batch = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-thnum")) {
-			thnum = atoi(argv[++i]);
-			if (thnum < 1)
-				die("Invalid -thnum option");
-		} else if (!strcmp(argv[i], "-key")) {
-			keygen_set_generator(argv[++i]);
-		} else if (!strcmp(argv[i], "-debug")) {
-			debug = true;
-		} else if (!strcmp(argv[i], "-share")) {
-			share = atoi(argv[++i]);
-		} else {
-			die("Invalid command option: %s", argv[i]);
-		}
-	}
-}
-
-static void put_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
-{
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	char *value = xmalloc(vsiz);
 	int i;
@@ -90,8 +49,9 @@ static void put_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
 	free(value);
 }
 
-static void get_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
+static void get_test(void *db, int num, int vsiz, unsigned int seed)
 {
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	int i;
 
@@ -104,7 +64,7 @@ static void get_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
 
 		value = tcrdbget(rdb, key, strlen(key), &siz);
 		if (debug && vsiz != siz)
-			die("Unexpected value size");
+			die("Unexpected value size: %d", siz);
 			
 		free(value);
 	}
@@ -120,9 +80,10 @@ static TCLIST *do_tcrdbmisc(TCRDB *rdb, const char *name, const TCLIST *args)
 	return rv;
 }
 
-static void putlist_test(TCRDB *rdb, const char *command, int num, int vsiz,
-			unsigned int seed)
+static void putlist_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
 {
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	char *value = xmalloc(vsiz);
 	TCLIST *list = tclistnew();
@@ -139,7 +100,8 @@ static void putlist_test(TCRDB *rdb, const char *command, int num, int vsiz,
 			tclistclear(list);
 		}
 	}
-	tclistdel(do_tcrdbmisc(rdb, command, list));
+	if (tclistnum(list))
+		tclistdel(do_tcrdbmisc(rdb, command, list));
 
 	tclistdel(list);
 	free(value);
@@ -156,20 +118,20 @@ static void check_keys(TCLIST *list, int num, unsigned int seed)
 	keygen_init(&keygen, seed);
 
 	if (num != tclistnum(list))
-		die("Unexpected key num");
+		die("Unexpected key num: %d", tclistnum(list));
 
 	for (i = 0; i < num; i++) {
-		const char *key;
 		int ksiz;
+		const char *key = tclistval(list, i, &ksiz);
 
-		key = tclistval(list, i, &ksiz);
 		if (strncmp(keygen_next_key(&keygen), key, ksiz))
-			die("Unexpected key"); 
+			die("Unexpected key");
 	}
 }
 
-static void fwmkeys_test(TCRDB *rdb, int num, unsigned int seed)
+static void fwmkeys_test(void *db, int num, unsigned int seed)
 {
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	char prefix[KEYGEN_PREFIX_SIZE + 1];
 	TCLIST *list;
@@ -200,24 +162,23 @@ static void check_records(TCLIST *recs, struct keygen *keygen, int vsiz,
 		die("Unexpected list size %d", recnum);
 
 	for (i = 0; i < recnum; i += 2) {
-		const void *key;
-		const void *val;
 		int keysiz;
+		const char *key = tclistval(recs, i, &keysiz);
 		int valsiz;
-
-		key = tclistval(recs, i, &keysiz);
-		val = tclistval(recs, i + 1, &valsiz);
 
 		if (strncmp(keygen_next_key(keygen), key, keysiz))
 			die("Unexpected key");
+
+		tclistval(recs, i + 1, &valsiz);
 		if (valsiz != vsiz)
 			die("Unexpected value size %d", valsiz);
 	}
 }
 
-static void getlist_test(TCRDB *rdb, const char *command, int num, int vsiz,
-			unsigned int seed)
+static void getlist_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
 {
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	struct keygen keygen_for_check;
 	TCLIST *list = tclistnew();
@@ -238,15 +199,19 @@ static void getlist_test(TCRDB *rdb, const char *command, int num, int vsiz,
 			tclistclear(list);
 		}
 	}
-	recs = do_tcrdbmisc(rdb, command, list);
-	check_records(recs, &keygen_for_check, vsiz, tclistnum(list));
-	tclistdel(recs);
+	if (tclistnum(list)) {
+		recs = do_tcrdbmisc(rdb, command, list);
+		check_records(recs, &keygen_for_check, vsiz, tclistnum(list));
+		tclistdel(recs);
+	}
 
 	tclistdel(list);
 }
 
-static void range_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
+static void range1_test(void *db, int num, int vsiz, int batch,
+			unsigned int seed)
 {
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	TCLIST *args = tclistnew();
 	char start_key[KEYGEN_PREFIX_SIZE + 1];
@@ -285,8 +250,10 @@ static void range_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
 	tclistdel(args);
 }
 
-static void range2_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
+static void range2_test(void *db, int num, int vsiz, int batch,
+			unsigned int seed)
 {
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	TCLIST *args = tclistnew();
 	char start_key[KEYGEN_PREFIX_SIZE + 1];
@@ -327,8 +294,21 @@ static void range2_test(TCRDB *rdb, int num, int vsiz, unsigned int seed)
 	tclistdel(args);
 }
 
-static void outlist_test(TCRDB *rdb, const char *command, int num, unsigned int seed)
+static void range_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
 {
+	if (!strcmp(command, "range"))
+		return range1_test(db, num, vsiz, batch, seed);
+	else if (!strcmp(command, "range2"))
+		return range2_test(db, num, vsiz, batch, seed);
+
+	die("invalid range command");
+}
+
+static void outlist_test(void *db, const char *command, int num, int batch,
+			unsigned int seed)
+{
+	TCRDB *rdb = db;
 	struct keygen keygen;
 	TCLIST *list = tclistnew();
 	int i;
@@ -343,145 +323,41 @@ static void outlist_test(TCRDB *rdb, const char *command, int num, unsigned int 
 			tclistclear(list);
 		}
 	}
-	tclistdel(do_tcrdbmisc(rdb, command, list));
+	if (tclistnum(list))
+		tclistdel(do_tcrdbmisc(rdb, command, list));
 
 	tclistdel(list);
 }
 
-struct thread_data {
-	pthread_t tid;
-	pthread_barrier_t *barrier;
-	TCRDB *rdb;
-	unsigned int seed;
-	unsigned long long elapsed;
+static struct benchmark_config config = {
+	.producer = "nop",
+	.consumer = "nop",
+	.host = "localhost",
+	.port = 1978,
+	.num = 5000000,
+	.vsiz = 100,
+	.batch = 1000,
+	.thnum = 1,
+	.debug = false,
+	.share = 0,
+	.ops = {
+		.open_db = open_db,
+		.close_db = close_db,
+		.put_test = put_test,
+		.get_test = get_test,
+		.putlist_test = putlist_test,
+		.fwmkeys_test = fwmkeys_test,
+		.getlist_test = getlist_test,
+		.range_test = range_test,
+		.outlist_test = outlist_test,
+	},
 };
-
-static void *benchmark_thread(void *arg)
-{
-	struct thread_data *data = arg;
-	unsigned long long start;
-	TCRDB *rdb = data->rdb;
-	unsigned int seed = data->seed;
-
-	pthread_barrier_wait(data->barrier);
-
-	start = stopwatch_start();
-
-	if (!strcmp(command, "putlist") || !strcmp(command, "putlist2")) {
-		putlist_test(rdb, command, num, vsiz, seed);
-	} else if (!strcmp(command, "fwmkeys")) {
-		fwmkeys_test(rdb, num, seed);
-	} else if (!strcmp(command, "range")) {
-		range_test(rdb, num, vsiz, seed);
-	} else if (!strcmp(command, "range2")) {
-		range2_test(rdb, num, vsiz, seed);
-	} else if (!strcmp(command, "getlist") || !strcmp(command, "getlist2")) {
-		getlist_test(rdb, command, num, vsiz, seed);
-	} else if (!strcmp(command, "fwmkeys-getlist")) {
-		fwmkeys_test(rdb, num, seed);
-		getlist_test(rdb, "getlist", num, vsiz, seed);
-	} else if (!strcmp(command, "fwmkeys-getlist2")) {
-		fwmkeys_test(rdb, num, seed);
-		getlist_test(rdb, "getlist2", num, vsiz, seed);
-	} else if (!strcmp(command, "outlist") || !strcmp(command, "outlist2")) {
-		outlist_test(rdb, command, num, seed);
-	} else if (!strcmp(command, "fwmkeys-outlist")) {
-		fwmkeys_test(rdb, num, seed);
-		outlist_test(rdb, "outlist", num, seed);
-	} else if (!strcmp(command, "fwmkeys-outlist2")) {
-		fwmkeys_test(rdb, num, seed);
-		outlist_test(rdb, "outlist2", num, seed);
-	} else if (!strcmp(command, "put")) {
-		put_test(rdb, num, vsiz, seed);
-	} else if (!strcmp(command, "get")) {
-		get_test(rdb, num, vsiz, seed);
-	} else {
-		die("Invalid command %s", command);
-	}
-
-	data->elapsed = stopwatch_stop(start);
-
-	return NULL;
-}
-
-static void open_rdb(struct thread_data *data, int thnum)
-{
-	int i;
-
-	if (share) {
-		for (i = 0; i < thnum; i++) {
-			if ((i % share) == i)
-				data[i].rdb = open_db(host, port);
-			else
-				data[i].rdb = data[i % share].rdb;
-		}
-	} else {
-		for (i = 0; i < thnum; i++)
-			data[i].rdb = open_db(host, port);
-	}
-}
-
-static void close_rdb(struct thread_data *data, int thnum)
-{
-	int i;
-
-	if (share) {
-		for (i = 0; i < thnum; i++)
-			if ((i % share) == i)
-				close_db(data[i].rdb);
-	} else {
-		for (i = 0; i < thnum; i++)
-			close_db(data[i].rdb);
-	}
-}
-
-static void benchmark(void)
-{
-	int i;
-	unsigned long long sum = 0, min = ULONG_MAX, max = 0, avg;
-	pthread_barrier_t barrier;
-	struct thread_data *data;
-
-	pthread_barrier_init(&barrier, NULL, thnum);
-	data = xmalloc(sizeof(*data) * thnum);
-
-	open_rdb(data, thnum);
-
-	for (i = 0; i < thnum; i++) {
-		data[i].seed = seed + i;
-		data[i].barrier = &barrier;
-	}
-
-	for (i = 0; i < thnum; i++)
-		xpthread_create(&data[i].tid, benchmark_thread, &data[i]);
-
-	for (i = 0; i < thnum; i++)
-		xpthread_join(data[i].tid);
-
-	for (i = 0; i < thnum; i++) {
-		unsigned long long elapsed = data[i].elapsed;
-
-		sum += elapsed;
-		min = _MIN(min, elapsed);
-		max = _MAX(max, elapsed);
-	}
-	avg = sum / thnum;
-
-	printf("# %lld.%03lld %lld.%03lld %lld.%03lld\n",
-			avg / 1000000, avg / 1000 % 1000,
-			min / 1000000, min / 1000 % 1000,
-			max / 1000000, max / 1000 % 1000);
-	fflush(stdout);
-
-	close_rdb(data, thnum);
-
-	free(data);
-}
 
 int main(int argc, char **argv)
 {
-	parse_options(argc, argv);
-	benchmark();
+	parse_options(&config, argc, argv);
+	debug = config.debug;
+	benchmark(&config);
 
 	return 0;
 }

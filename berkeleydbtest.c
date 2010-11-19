@@ -1,8 +1,6 @@
 #include <db.h>
 #include <string.h>
-#include <stdio.h>
-#include <limits.h>
-#include <unistd.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include "testutil.h"
 
@@ -100,14 +98,14 @@ static void exit_env(DB_ENV *env)
 	env->close(env, 0);
 }
 
-static struct BDB *open_db(const char *path)
+static void *open_db(struct benchmark_config *config)
 {
 	int ret;
 	struct BDB *bdb = xmalloc(sizeof(*bdb));
 	DB *db;
 	DB_ENV *dbenv;
 
-	dbenv = init_env(path);
+	dbenv = init_env(config->path);
 
 	ret = db_create(&db, dbenv, 0);
 	if (ret) {
@@ -140,10 +138,10 @@ static struct BDB *open_db(const char *path)
 	return bdb;
 }
 
-static void close_db(struct BDB *bdb)
+static void close_db(void *db)
 {
+	struct BDB *bdb = db;
 	DB_ENV *dbenv = bdb->dbenv;
-	DB *db = bdb->db;
 
 	pthread_mutex_lock(&bdb->stop_mutex);
 	bdb->stop = true;
@@ -154,50 +152,10 @@ static void close_db(struct BDB *bdb)
 	xpthread_join(bdb->trickle_tid);
 #endif
 
-	db->close(db, 0);
+	bdb->db->close(bdb->db, 0);
 	exit_env(dbenv);
 
 	free(bdb);
-}
-
-static char *command = "";
-static char *path = "data";
-static int num = 5000000;
-static int vsiz = 100;
-static unsigned int seed;
-static int batch = 1000;
-static int thnum = 1;
-static bool debug = false;
-
-static void parse_options(int argc, char **argv)
-{
-	int i;
-
-	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "-command")) {
-			command = argv[++i];
-		} else if (!strcmp(argv[i], "-path")) {
-			path = argv[++i];
-		} else if (!strcmp(argv[i], "-num")) {
-			num = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-vsiz")) {
-			vsiz = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-seed")) {
-			seed = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-batch")) {
-			batch = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-thnum")) {
-			thnum = atoi(argv[++i]);
-			if (thnum < 1)
-				die("Invalid -thnum option");
-		} else if (!strcmp(argv[i], "-key")) {
-			keygen_set_generator(argv[++i]);
-		} else if (!strcmp(argv[i], "-debug")) {
-			debug = true;
-		} else {
-			die("Invalid command option");
-		}
-	}
 }
 
 #define KSIZ KEYGEN_KEY_SIZE
@@ -220,8 +178,10 @@ retry:
 	}
 }
 
-static void putlist_test(DB *db, int num, int vsiz, unsigned int seed)
+static void putlist_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
 {
+	DB *bdb = ((struct BDB *)db)->db;
 	struct keygen keygen;
 	char *value = xmalloc(vsiz);
 	DBT key, data;
@@ -252,7 +212,7 @@ static void putlist_test(DB *db, int num, int vsiz, unsigned int seed)
 			die("DB_MULTIPLE_WRITE_NEXT failed");
 
 		if ((i + 1) % batch == 0) {
-			db_put(db, &key, &data, DB_MULTIPLE);
+			db_put(bdb, &key, &data, DB_MULTIPLE);
 
 			free(key.data);
 			free(data.data);
@@ -274,7 +234,7 @@ static void putlist_test(DB *db, int num, int vsiz, unsigned int seed)
 	}
 
 	if (num % batch) {
-		db_put(db, &key, &data, DB_MULTIPLE);
+		db_put(bdb, &key, &data, DB_MULTIPLE);
 		free(key.data);
 		free(data.data);
 	}
@@ -300,8 +260,10 @@ retry:
 	}
 }
 
-static void outlist_test(DB *db, int num, unsigned int seed)
+static void outlist_test(void *db, const char *command, int num, int batch,
+			unsigned int seed)
 {
+	DB *bdb = ((struct BDB *)db)->db;
 	struct keygen keygen;
 	DBT key;
 	void *ptrk;
@@ -324,7 +286,7 @@ static void outlist_test(DB *db, int num, unsigned int seed)
 			die("DB_MULTIPLE_WRITE_NEXT failed");
 
 		if ((i + 1) % batch == 0) {
-			db_del(db, &key, DB_MULTIPLE);
+			db_del(bdb, &key, DB_MULTIPLE);
 
 			free(key.data);
 
@@ -338,91 +300,67 @@ static void outlist_test(DB *db, int num, unsigned int seed)
 		}
 	}
 	if (num % batch) {
-		db_del(db, &key, DB_MULTIPLE);
+		db_del(bdb, &key, DB_MULTIPLE);
 		free(key.data);
 	}
 }
 
-struct thread_data {
-	pthread_t tid;
-	pthread_barrier_t *barrier;
-	DB *db;
-	unsigned int seed;
-	unsigned long long elapsed;
+static void put_test(void *db, int num, int vsiz, unsigned int seed)
+{
+	die("put_test is not implemented");
+}
+
+static void get_test(void *db, int num, int vsiz, unsigned int seed)
+{
+	die("get_test is not implemented");
+}
+
+static void fwmkeys_test(void *db, int num, unsigned int seed)
+{
+	die("fwmkeys_test is not implemented");
+}
+
+static void getlist_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	die("getlist_test is not implemented");
+}
+
+static void range_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	die("range_test is not implemented");
+}
+
+struct benchmark_config config = {
+	.producer = "nop",
+	.consumer = "nop",
+	.path = "data",
+	.num = 5000000,
+	.vsiz = 100,
+	.batch = 1000,
+	.thnum = 1,
+	.debug = false,
+	.share = 1,
+	.ops = {
+		.open_db = open_db,
+		.close_db = close_db,
+		.put_test = put_test,
+		.get_test = get_test,
+		.putlist_test = putlist_test,
+		.fwmkeys_test = fwmkeys_test,
+		.getlist_test = getlist_test,
+		.range_test = range_test,
+		.outlist_test = outlist_test,
+	},
 };
-
-static void *benchmark_thread(void *arg)
-{
-	struct thread_data *data = arg;
-	unsigned long long start;
-	DB *db = data->db;
-	unsigned int seed = data->seed;
-
-	pthread_barrier_wait(data->barrier);
-
-	start = stopwatch_start();
-
-	if (!strcmp(command, "putlist")) {
-		putlist_test(db, num, vsiz, seed);
-	} else if (!strcmp(command, "outlist")) {
-		outlist_test(db, num, seed);
-	} else {
-		die("Invalid command %s", command);
-	}
-
-	data->elapsed = stopwatch_stop(start);
-
-	return NULL;
-}
-
-static void benchmark(DB *db)
-{
-	int i;
-	unsigned long long sum = 0, min = ULONG_MAX, max = 0, avg;
-	pthread_barrier_t barrier;
-	struct thread_data *data;
-
-	pthread_barrier_init(&barrier, NULL, thnum);
-	data = xmalloc(sizeof(*data) * thnum);
-
-	for (i = 0; i < thnum; i++) {
-		data[i].db = db;
-		data[i].seed = seed + i;
-		data[i].barrier = &barrier;
-	}
-
-	for (i = 0; i < thnum; i++)
-		xpthread_create(&data[i].tid, benchmark_thread, &data[i]);
-
-	for (i = 0; i < thnum; i++)
-		xpthread_join(data[i].tid);
-
-	for (i = 0; i < thnum; i++) {
-		unsigned long long elapsed = data[i].elapsed;
-
-		sum += elapsed;
-		min = _MIN(min, elapsed);
-		max = _MAX(max, elapsed);
-	}
-	avg = sum / thnum;
-
-	printf("# %lld.%03lld %lld.%03lld %lld.%03lld\n",
-			avg / 1000000, avg / 1000 % 1000,
-			min / 1000000, min / 1000 % 1000,
-			max / 1000000, max / 1000 % 1000);
-	fflush(stdout);
-
-	free(data);
-}
 
 int main(int argc, char **argv)
 {
-	struct BDB *bdb;
-
-	parse_options(argc, argv);
-	bdb = open_db(path);
-	benchmark(bdb->db);
-	close_db(bdb);
+	parse_options(&config, argc, argv);
+	if (config.share != 1)
+		die("Invalid -share option");
+	benchmark(&config);
 
 	return 0;
 }
