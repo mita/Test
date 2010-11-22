@@ -39,13 +39,13 @@ testutil.o: testutil.c testutil.h
 	$(CC) $(CFLAGS) -c $<
 
 tokyocabinettest: tokyocabinettest.c testutil.o
-	$(CC) $(CFLAGS) -o $@ $< testutil.o -ltokyocabinet
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< testutil.o -ltokyocabinet
 
 berkeleydbtest: berkeleydbtest.c testutil.o
-	$(CC) $(CFLAGS) -o $@ $< testutil.o -ldb
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< testutil.o -ldb
 
 tokyotyranttest: tokyotyranttest.c testutil.o
-	$(CC) $(CFLAGS) -o $@ $<  testutil.o -ltokyotyrant -ltokyocabinet
+	$(CC) $(CFLAGS)  $(LDFLAGS) -o $@ $<  testutil.o -ltokyotyrant -ltokyocabinet
 
 kyototycoontest: kyototycoontest.cc testutil.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<  testutil.o -lkyototycoon

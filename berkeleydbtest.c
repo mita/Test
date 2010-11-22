@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include "testutil.h"
 
+static bool debug = false;
+
 /* Disable memory pool trickle thread by default */
 #undef USE_MEMP_TRICKLE_THREAD
 
@@ -307,12 +309,79 @@ static void outlist_test(void *db, const char *command, int num, int batch,
 
 static void put_test(void *db, int num, int vsiz, unsigned int seed)
 {
-	die("put_test is not implemented");
+	DB *bdb = ((struct BDB *)db)->db;
+	struct keygen keygen;
+	char *value = xmalloc(vsiz);
+	DBT key, data;
+	int i;
+
+	keygen_init(&keygen, seed);
+
+	memset(&key, 0, sizeof(key));
+	memset(&data, 0, sizeof(data));
+
+	key.ulen = KSIZ;
+	key.flags = DB_DBT_USERMEM;
+	key.data = xmalloc(key.ulen);
+
+	data.ulen = vsiz;
+	data.flags = DB_DBT_USERMEM;
+	data.data = xmalloc(data.ulen);
+
+	for (i = 0; i < num; i++) {
+		memcpy(key.data, keygen_next_key(&keygen), KSIZ);
+		key.size = KSIZ;
+
+		memcpy(data.data, value, vsiz);
+		data.size = vsiz;
+
+		db_put(bdb, &key, &data, DB_NOOVERWRITE);
+	}
+
+	free(key.data);
+	free(data.data);
+	free(value);
 }
 
 static void get_test(void *db, int num, int vsiz, unsigned int seed)
 {
-	die("get_test is not implemented");
+	DB *bdb = ((struct BDB *)db)->db;
+	struct keygen keygen;
+	char *value = xmalloc(vsiz);
+	DBT key, data;
+	int i;
+
+	keygen_init(&keygen, seed);
+
+	memset(&key, 0, sizeof(key));
+	memset(&data, 0, sizeof(data));
+
+	key.ulen = KSIZ;
+	key.size = KSIZ;
+	key.flags = DB_DBT_USERMEM;
+	key.data = xmalloc(key.ulen);
+
+	data.flags = DB_DBT_MALLOC;
+
+	for (i = 0; i < num; i++) {
+		int ret;
+
+		memcpy(key.data, keygen_next_key(&keygen), KSIZ);
+		key.size = KSIZ;
+
+		ret = bdb->get(bdb, NULL, &key, &data, 0);
+		if (ret) {
+			bdb->err(bdb, ret, "DB->get");
+			continue;
+		}
+		if (debug && vsiz != data.size)
+			die("Unexpected value size: %d", data.size);
+
+		free(data.data);
+	}
+
+	free(key.data);
+	free(value);
 }
 
 static void fwmkeys_test(void *db, int num, unsigned int seed)
@@ -329,7 +398,62 @@ static void getlist_test(void *db, const char *command, int num, int vsiz,
 static void range_test(void *db, const char *command, int num, int vsiz,
 			int batch, unsigned int seed)
 {
-	die("range_test is not implemented");
+	DB *bdb = ((struct BDB *)db)->db;
+	struct keygen keygen;
+	char *value = xmalloc(vsiz);
+	DBT key, data;
+	DBC *cursor;
+	u_int32_t flags;
+	int i;
+	int ret;
+	char prefix[KEYGEN_PREFIX_SIZE + 1];
+
+	keygen_init(&keygen, seed);
+
+	memset(&key, 0, sizeof(key));
+	memset(&data, 0, sizeof(data));
+
+	key.ulen = KSIZ;
+	key.flags = DB_DBT_USERMEM;
+	key.data = xmalloc(key.ulen);
+
+	data.flags = DB_DBT_MALLOC;
+
+	ret = bdb->cursor(bdb, NULL, &cursor, 0);
+	if (ret) {
+		bdb->err(bdb, ret, "DB->cursor");
+		return;
+	}
+	keygen_prefix(&keygen, prefix);
+
+	memcpy(key.data, prefix, KEYGEN_PREFIX_SIZE);
+	key.size = KEYGEN_PREFIX_SIZE;
+	flags = DB_SET_RANGE;
+
+	for (i = 0; i < num; i++) {
+		ret = cursor->get(cursor, &key, &data, flags);
+
+		if (ret == DB_NOTFOUND) {
+			break;
+		} else if (ret) {
+			bdb->err(bdb, ret, "cursor->get");
+			break;
+		}
+		if (debug && memcmp(key.data, keygen_next_key(&keygen), KSIZ))
+			die("Unexpected key");
+		if (debug && vsiz != data.size)
+			die("Unexpected value size %d", data.size);
+
+		free(data.data);
+		flags = DB_NEXT;
+	}
+	if (i != num)
+		die("Unexpected record num");
+
+	cursor->close(cursor);
+
+	free(key.data);
+	free(value);
 }
 
 struct benchmark_config config = {
@@ -358,8 +482,11 @@ struct benchmark_config config = {
 int main(int argc, char **argv)
 {
 	parse_options(&config, argc, argv);
+
 	if (config.share != 1)
 		die("Invalid -share option");
+	debug = config.debug;
+
 	benchmark(&config);
 
 	return 0;
