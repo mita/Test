@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <err.h>
 #include <sys/time.h>
+#include <tcutil.h>
 #include "testutil.h"
 
 void die(const char *err, ...)
@@ -129,12 +130,14 @@ static unsigned long long stopwatch_stop(unsigned long long start)
 
 static void fixup_config(struct benchmark_config *config)
 {
-	if (config->thnum < 1)
-		config->thnum = 1;
+	if (config->producer_thnum < 1)
+		config->producer_thnum = 1;
+	if (config->consumer_thnum < 1)
+		config->consumer_thnum = 1;
 	if (config->share < 1)
-		config->share = config->thnum;
+		config->share = INT_MAX;
 	if (config->num_works < 1)
-		config->num_works = config->thnum;
+		config->num_works = config->producer_thnum;
 }
 
 void parse_options(struct benchmark_config *config, int argc, char **argv)
@@ -144,6 +147,7 @@ void parse_options(struct benchmark_config *config, int argc, char **argv)
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-command")) {
 			config->producer = argv[++i];
+			config->consumer = "nop";
 		} else if (!strcmp(argv[i], "-producer")) {
 			config->producer = argv[++i];
 		} else if (!strcmp(argv[i], "-consumer")) {
@@ -163,13 +167,20 @@ void parse_options(struct benchmark_config *config, int argc, char **argv)
 		} else if (!strcmp(argv[i], "-batch")) {
 			config->batch = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-thnum")) {
-			config->thnum = atoi(argv[++i]);
+			config->producer_thnum = atoi(argv[++i]);
+			config->consumer_thnum = config->producer_thnum;
+		} else if (!strcmp(argv[i], "-producer-thnum")) {
+			config->producer_thnum = atoi(argv[++i]);
+		} else if (!strcmp(argv[i], "-consumer-thnum")) {
+			config->consumer_thnum = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-work")) {
 			config->num_works = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-key")) {
 			keygen_set_generator(argv[++i]);
 		} else if (!strcmp(argv[i], "-debug")) {
 			config->debug = true;
+		} else if (!strcmp(argv[i], "-verbose")) {
+			config->verbose = atoi(argv[++i]);
 		} else if (!strcmp(argv[i], "-share")) {
 			config->share = atoi(argv[++i]);
 		} else {
@@ -181,13 +192,14 @@ void parse_options(struct benchmark_config *config, int argc, char **argv)
 }
 
 struct work {
-	struct work *next;
 	unsigned int seed;
-	unsigned long long elapsed;
+	int progress;
+	unsigned long long start[2];
+	unsigned long long elapsed[2];
 };
 
 struct work_queue {
-	struct work *head;
+	TCPTRLIST *list;
 	pthread_mutex_t mutex;
 	pthread_cond_t cond;
 	bool open;
@@ -211,10 +223,22 @@ static void work_queue_close(struct work_queue *queue)
 
 static void work_queue_init(struct work_queue *queue)
 {
-	queue->head = NULL;
+	queue->list = tcptrlistnew();
 	pthread_mutex_init(&queue->mutex, NULL);
 	pthread_cond_init(&queue->cond, NULL);
 	work_queue_open(queue);
+}
+
+static void work_queue_destroy(struct work_queue *queue)
+{
+	pthread_mutex_lock(&queue->mutex);
+	if (tcptrlistnum(queue->list) > 0)
+		die("work queue is not empty");
+	pthread_mutex_unlock(&queue->mutex);
+
+	tcptrlistdel(queue->list);
+	pthread_mutex_destroy(&queue->mutex);
+	pthread_cond_destroy(&queue->cond);
 }
 
 static void work_queue_push(struct work_queue *queue, struct work *work)
@@ -222,8 +246,7 @@ static void work_queue_push(struct work_queue *queue, struct work *work)
 	pthread_mutex_lock(&queue->mutex);
 	if (!queue->open)
 		die("work queue is closed");
-	work->next = queue->head;
-	queue->head = work;
+	tcptrlistunshift(queue->list, work);
 	pthread_cond_signal(&queue->cond);
 	pthread_mutex_unlock(&queue->mutex);
 }
@@ -234,13 +257,14 @@ static struct work *work_queue_pop(struct work_queue *queue)
 
 	pthread_mutex_lock(&queue->mutex);
 	while (1) {
-		work = queue->head;
-		if (work) {
-			queue->head = work->next;
+#define WORK_QUEUE_FIFO
+#ifdef WORK_QUEUE_FIFO
+		work = tcptrlistpop(queue->list);
+#else /* LIFO */
+		work = tcptrlistshift(queue->list);
+#endif
+		if (work || !queue->open)
 			break;
-		} else if (!queue->open) {
-			break;
-		}
 		pthread_cond_wait(&queue->cond, &queue->mutex);
 	}
 	pthread_mutex_unlock(&queue->mutex);
@@ -262,7 +286,10 @@ static void handle_work(struct worker_info *data, struct work *work)
 	const char *command = data->command;
 	struct benchmark_config *config = data->config;
 	struct benchmark_operations *bops = &config->ops;
-	unsigned long long start;
+	unsigned long start, elapsed;
+
+	if (work->progress > 1)
+		die("something wrong happened");
 
 	start = stopwatch_start();
 
@@ -273,6 +300,9 @@ static void handle_work(struct worker_info *data, struct work *work)
 		bops->fwmkeys_test(data->db, config->num, work->seed);
 	} else if (!strcmp(command, "range") || !strcmp(command, "range2")) {
 		bops->range_test(data->db, command, config->num,
+				config->vsiz, config->batch, work->seed);
+	} else if (!strcmp(command, "rangeout")) {
+		bops->rangeout_test(data->db, command, config->num,
 				config->vsiz, config->batch, work->seed);
 	} else if (!strcmp(command, "getlist") || !strcmp(command, "getlist2")) {
 		bops->getlist_test(data->db, command, config->num,
@@ -305,7 +335,11 @@ static void handle_work(struct worker_info *data, struct work *work)
 	} else {
 		die("Invalid command %s", command);
 	}
-	work->elapsed += stopwatch_stop(start);
+
+	elapsed = stopwatch_stop(start);
+	work->start[work->progress] = start;
+	work->elapsed[work->progress] = elapsed;
+	work->progress++;
 }
 
 static void *benchmark_thread(void *arg)
@@ -322,10 +356,9 @@ static void *benchmark_thread(void *arg)
 }
 
 static struct worker_info *create_workers(struct benchmark_config *config,
-		const char *command, struct work_queue *in_queue,
+		int thnum, const char *command, struct work_queue *in_queue,
 		struct work_queue *out_queue)
 {
-	int thnum = config->thnum;
 	struct worker_info *data = xmalloc(sizeof(*data) * thnum);
 	int i;
 
@@ -346,21 +379,20 @@ static struct worker_info *create_workers(struct benchmark_config *config,
 	return data;
 }
 
-static void join_workers(struct benchmark_config *config,
-			struct worker_info *data)
+static void join_workers(struct worker_info *data, int thnum)
 {
 	int i;
 
-	for (i = 0; i < config->thnum; i++)
+	for (i = 0; i < thnum; i++)
 		xpthread_join(data[i].tid);
 }
 
-static void destroy_workers(struct worker_info *data)
+static void destroy_workers(struct worker_info *data, int thnum)
 {
 	struct benchmark_config *config = data[0].config;
 	int i;
 
-	for (i = 0; i < config->thnum; i++) {
+	for (i = 0; i < thnum; i++) {
 		if ((i % config->share) == i)
 			config->ops.close_db(data[i].db);
 	}
@@ -379,57 +411,99 @@ static void destroy_workers(struct worker_info *data)
 	(void) (&_max1 == &_max2);		\
 	_max1 > _max2 ? _max1 : _max2; })
 
+static void collect_results(struct benchmark_config *config,
+			struct work_queue *queue, unsigned long long start,
+			unsigned long long elapsed)
+{
+	int i;
+	unsigned long long sum[2] = { 0, 0 }, min[2] = { ULONG_MAX, ULONG_MAX };
+	unsigned long long max[2] = { 0, 0 }, avg[2];
+
+	for (i = 0; i < config->num_works; i++) {
+		struct work *work = work_queue_pop(queue);
+
+		sum[0] += work->elapsed[0];
+		sum[1] += work->elapsed[1];
+		min[0] = _MIN(min[0], work->elapsed[0]);
+		min[1] = _MIN(min[1], work->elapsed[1]);
+		max[0] = _MAX(max[0], work->elapsed[0]);
+		max[1] = _MAX(max[1], work->elapsed[1]);
+
+		if (config->verbose > 1) {
+			printf(
+			"%lld.%03lld %lld.%03lld %lld.%03lld %lld.%03lld\n",
+				(work->start[0] - start) / 1000000,
+				(work->start[0] - start) / 1000 % 1000,
+				work->elapsed[0] / 1000000,
+				work->elapsed[0] / 1000 % 1000,
+				(work->start[1] - start) / 1000000,
+				(work->start[1] - start) / 1000 % 1000,
+				work->elapsed[1] / 1000000,
+				work->elapsed[1] / 1000 % 1000);
+		}
+		free(work);
+	}
+	avg[0] = sum[0] / config->num_works;
+	avg[1] = sum[1] / config->num_works;
+
+	if (config->verbose > 0) {
+		printf(
+		"# %lld.%03lld %lld.%03lld %lld.%03lld %lld.%03lld %lld.%03lld %lld.%03lld\n",
+			avg[0] / 1000000, avg[0] / 1000 % 1000,
+			min[0] / 1000000, min[0] / 1000 % 1000,
+			max[0] / 1000000, max[0] / 1000 % 1000,
+			avg[1] / 1000000, avg[1] / 1000 % 1000,
+			min[1] / 1000000, min[1] / 1000 % 1000,
+			max[1] / 1000000, max[1] / 1000 % 1000);
+	}
+}
+
 void benchmark(struct benchmark_config *config)
 {
 	int i;
-	unsigned long long sum = 0, min = ULONG_MAX, max = 0, avg;
 	struct worker_info *producers;
 	struct worker_info *consumers;
 	struct work_queue queue_to_producer;
 	struct work_queue queue_to_consumer;
 	struct work_queue trash_queue;
+	unsigned long long start, elapsed;
 
 	work_queue_init(&queue_to_producer);
 	work_queue_init(&queue_to_consumer);
 	work_queue_init(&trash_queue);
 
-	producers = create_workers(config, config->producer, &queue_to_producer,
+	producers = create_workers(config, config->producer_thnum,
+				config->producer, &queue_to_producer,
 				&queue_to_consumer);
-	consumers = create_workers(config, config->consumer, &queue_to_consumer,
+	consumers = create_workers(config, config->consumer_thnum,
+				config->consumer, &queue_to_consumer,
 				&trash_queue);
+
+	start = stopwatch_start();
 
 	for (i = 0; i < config->num_works; i++) {
 		struct work *work = xmalloc(sizeof(*work));
 
+		memset(work, 0, sizeof(*work));
 		work->seed = config->seed_offset + i;
-		work->elapsed = 0;
 		work_queue_push(&queue_to_producer, work);
 	}
 	work_queue_close(&queue_to_producer);
 
-	join_workers(config, producers);
+	join_workers(producers, config->producer_thnum);
 	work_queue_close(&queue_to_consumer);
 
-	join_workers(config, consumers);
+	join_workers(consumers, config->consumer_thnum);
 	work_queue_close(&trash_queue);
 
-	for (i = 0; i < config->num_works; i++) {
-		struct work *work = work_queue_pop(&trash_queue);
-		unsigned long long elapsed = work->elapsed;
+	elapsed = stopwatch_stop(start);
 
-		sum += elapsed;
-		min = _MIN(min, elapsed);
-		max = _MAX(max, elapsed);
-		free(work);
-	}
-	avg = sum / config->num_works;
+	collect_results(config, &trash_queue, start, elapsed);
 
-	printf("# %lld.%03lld %lld.%03lld %lld.%03lld\n",
-			avg / 1000000, avg / 1000 % 1000,
-			min / 1000000, min / 1000 % 1000,
-			max / 1000000, max / 1000 % 1000);
-	fflush(stdout);
+	destroy_workers(consumers, config->consumer_thnum);
+	destroy_workers(producers, config->producer_thnum);
 
-	destroy_workers(consumers);
-	destroy_workers(producers);
+	work_queue_destroy(&queue_to_producer);
+	work_queue_destroy(&queue_to_consumer);
+	work_queue_destroy(&trash_queue);
 }

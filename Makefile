@@ -42,13 +42,13 @@ tokyocabinettest: tokyocabinettest.c testutil.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< testutil.o -ltokyocabinet
 
 berkeleydbtest: berkeleydbtest.c testutil.o
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< testutil.o -ldb
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< testutil.o -ldb -ltokyocabinet
 
 tokyotyranttest: tokyotyranttest.c testutil.o
 	$(CC) $(CFLAGS)  $(LDFLAGS) -o $@ $<  testutil.o -ltokyotyrant -ltokyocabinet
 
 kyototycoontest: kyototycoontest.cc testutil.o
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<  testutil.o -lkyototycoon
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<  testutil.o -lkyototycoon -ltokyocabinet
 
 clean:
 	-rm -f $(TARGETS) *.o

@@ -239,7 +239,7 @@ static void range1_test(void *db, int num, int vsiz, int batch,
 		tclistdel(recs);
 		num -= num_recs;
 	}
-	if (num)
+	if (debug && num)
 		die("Unexpected record num");
 
 	tclistdel(args);
@@ -283,7 +283,7 @@ static void range2_test(void *db, int num, int vsiz, int batch,
 		tclistdel(recs);
 		num -= num_recs;
 	}
-	if (num)
+	if (debug && num)
 		die("Unexpected record num");
 
 	tclistdel(args);
@@ -298,6 +298,52 @@ static void range_test(void *db, const char *command, int num, int vsiz,
 		return range2_test(db, num, vsiz, batch, seed);
 
 	die("invalid range command");
+}
+
+static void rangeout_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	TCADB *adb = db;
+	struct keygen keygen;
+	TCLIST *args = tclistnew();
+	char start_key[KEYGEN_PREFIX_SIZE + 1];
+	char max[100];
+	char end_key[KEYGEN_PREFIX_SIZE + 1];
+	char binc[2];
+
+	keygen_init(&keygen, seed);
+
+	keygen_prefix(&keygen, start_key);
+	sprintf(max, "%d", batch);
+	keygen_prefix(&keygen, end_key);
+	end_key[KEYGEN_PREFIX_SIZE - 1] = '-' + 1;
+	sprintf(binc, "0");
+
+	tclistpush2(args, start_key);
+	tclistpush2(args, max);
+	tclistpush2(args, end_key);
+	tclistpush2(args, binc);
+
+	while (1) {
+		TCLIST *recs;
+
+		recs = do_tcadbmisc(adb, command, args);
+		if (tclistnum(recs) == 0)
+			break;
+
+		if (debug) {
+			const char *num_recs = tclistval2(recs, 0);
+			num -= atoi(num_recs);
+			if (num != 0 && atoi(num_recs) != batch)
+				die("Unexpected number of records are deleted");
+		}
+
+		tclistdel(recs);
+	}
+	if (debug && num != 0)
+		die("Unexpected number of records are deleted");
+
+	tclistdel(args);
 }
 
 static void outlist_test(void *db, const char *command, int num, int batch,
@@ -331,8 +377,10 @@ struct benchmark_config config = {
 	.num = 5000000,
 	.vsiz = 100,
 	.batch = 1000,
-	.thnum = 1,
+	.producer_thnum = 1,
+	.consumer_thnum = 1,
 	.debug = false,
+	.verbose = 1,
 	.share = 1,
 	.ops = {
 		.open_db = open_db,
@@ -343,6 +391,7 @@ struct benchmark_config config = {
 		.fwmkeys_test = fwmkeys_test,
 		.getlist_test = getlist_test,
 		.range_test = range_test,
+		.rangeout_test = rangeout_test,
 		.outlist_test = outlist_test,
 	},
 };

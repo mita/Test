@@ -45,6 +45,8 @@ struct benchmark_operations {
 				int batch, unsigned int seed);
 	void (*range_test)(void *db, const char *command, int num, int vsiz,
 				int batch, unsigned int seed);
+	void (*rangeout_test)(void *db, const char *command, int num, int vsiz,
+				int batch, unsigned int seed);
 	void (*outlist_test)(void *db, const char *command, int num, int batch,
 				unsigned int seed);
 };
@@ -59,9 +61,11 @@ struct benchmark_config {
 	int vsiz;
 	unsigned int seed_offset;
 	int batch;
-	int thnum;
+	int producer_thnum;
+	int consumer_thnum;
 	int num_works;
 	bool debug;
+	int verbose;
 	int share;
 	struct benchmark_operations ops;
 };

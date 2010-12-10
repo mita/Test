@@ -66,6 +66,32 @@ static void get_test(void *db, int num, int vsiz, unsigned int seed)
 	}
 }
 
+static void putlist_bin_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	RemoteDB *rdb = (RemoteDB *)db;
+	struct keygen keygen;
+	string value(vsiz, '\0');
+	vector<RemoteDB::BulkRecord> bulkrecs;
+	int i;
+
+	keygen_init(&keygen, seed);
+
+	for (i = 0; i < num; i++) {
+		string key(keygen_next_key(&keygen));
+		RemoteDB::BulkRecord rec = { 0, key, value, INT64_MAX };
+
+		bulkrecs.push_back(rec);
+
+		if (bulkrecs.size() >= batch) {
+			rdb->set_bulk_binary(bulkrecs);
+			bulkrecs.clear();
+		}
+	}
+	if (bulkrecs.size())
+		rdb->set_bulk_binary(bulkrecs);
+}
+
 static void putlist_test(void *db, const char *command, int num, int vsiz,
 			int batch, unsigned int seed)
 {
@@ -123,6 +149,37 @@ static void fwmkeys_test(void *db, int num, unsigned int seed)
 	check_keys(&list, num, seed);
 }
 
+static void check_bin_records(vector<RemoteDB::BulkRecord> *bulkrecs,
+			struct keygen *keygen, int vsiz, int batch)
+{
+	int recnum;
+
+	if (!debug)
+		return;
+
+	recnum = bulkrecs->size();
+
+	if (recnum != batch)
+		die("Unexpected list size %d", recnum);
+
+	vector<RemoteDB::BulkRecord>::iterator it = bulkrecs->begin();
+	vector<RemoteDB::BulkRecord>::iterator end = bulkrecs->end();
+
+	while (it != end) {
+		const char *key = it->key.data();
+		int keysiz = it->key.size();
+		int valsiz = it->value.size();
+
+		if (strncmp(keygen_next_key(keygen), key, keysiz))
+			die("Unexpected key");
+		if (valsiz != vsiz)
+			die("Unexpected value size %d", valsiz);
+
+		it++;
+	}
+}
+
+
 static void check_records(map<string, string> *recs, struct keygen *keygen,
 			int vsiz, int batch)
 {
@@ -150,6 +207,38 @@ static void check_records(map<string, string> *recs, struct keygen *keygen,
 			die("Unexpected value size %d", valsiz);
 
 		it++;
+	}
+}
+
+static void getlist_bin_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	RemoteDB *rdb = (RemoteDB *)db;
+	struct keygen keygen;
+	struct keygen keygen_for_check;
+	vector<RemoteDB::BulkRecord> bulkrecs;
+	int i;
+
+	keygen_init(&keygen, seed);
+	keygen_init(&keygen_for_check, seed);
+
+	for (i = 0; i < num; i++) {
+		string key(keygen_next_key(&keygen));
+		RemoteDB::BulkRecord rec = { 0, key, "", 0 };
+
+		bulkrecs.push_back(rec);
+
+		if (bulkrecs.size() >= batch) {
+			rdb->get_bulk_binary(&bulkrecs);
+			check_bin_records(&bulkrecs, &keygen_for_check, vsiz,
+					bulkrecs.size());
+			bulkrecs.clear();
+		}
+	}
+	if (bulkrecs.size()) {
+		rdb->get_bulk_binary(&bulkrecs);
+		check_bin_records(&bulkrecs, &keygen_for_check, vsiz,
+				bulkrecs.size());
 	}
 }
 
@@ -211,10 +300,41 @@ static void range_test(void *db, const char *command, int num, int vsiz,
 		nrecs++;
 		delete rec;
 	}
-	if (num != nrecs)
+	if (debug && num != nrecs)
 		die("Unexpected record num: %d", nrecs);
 
 	delete cur;
+}
+
+static void rangeout_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	die("rangeout_test is not implemented");
+}
+
+static void outlist_bin_test(void *db, const char *command, int num, int batch,
+			unsigned int seed)
+{
+	RemoteDB *rdb = (RemoteDB *)db;
+	struct keygen keygen;
+	vector<RemoteDB::BulkRecord> bulkrecs;
+	int i;
+
+	keygen_init(&keygen, seed);
+
+	for (i = 0; i < num; i++) {
+		string key(keygen_next_key(&keygen));
+		RemoteDB::BulkRecord rec = { 0, key, "", 0 };
+
+		bulkrecs.push_back(rec);
+
+		if (bulkrecs.size() >= batch) {
+			rdb->remove_bulk_binary(bulkrecs);
+			bulkrecs.clear();
+		}
+	}
+	if (bulkrecs.size())
+		rdb->remove_bulk_binary(bulkrecs);
 }
 
 static void outlist_test(void *db, const char *command, int num, int batch,
@@ -250,18 +370,27 @@ int main(int argc, char **argv)
 	config.num = 5000000;
 	config.vsiz = 100;
 	config.batch = 1000;
-	config.thnum = 1;
+	config.producer_thnum = 1;
+	config.consumer_thnum = 1;
 	config.debug = false;
+	config.verbose = 1;
 	config.share = 0;
 	config.ops.open_db = open_db;
 	config.ops.close_db = close_db;
 	config.ops.put_test = put_test;
 	config.ops.get_test = get_test;
-	config.ops.putlist_test = putlist_test;
 	config.ops.fwmkeys_test = fwmkeys_test;
-	config.ops.getlist_test = getlist_test;
+	config.ops.rangeout_test = rangeout_test;
+	if (0) { /* HTTP */
+		config.ops.putlist_test = putlist_test;
+		config.ops.getlist_test = getlist_test;
+		config.ops.outlist_test = outlist_test;
+	} else { /* binary protocol */
+		config.ops.putlist_test = putlist_bin_test;
+		config.ops.getlist_test = getlist_bin_test;
+		config.ops.outlist_test = outlist_bin_test;
+	}
 	config.ops.range_test = range_test;
-	config.ops.outlist_test = outlist_test;
 	
 	parse_options(&config, argc, argv);
 	debug = config.debug;

@@ -395,6 +395,12 @@ static void getlist_test(void *db, const char *command, int num, int vsiz,
 	die("getlist_test is not implemented");
 }
 
+static void rangeout_test(void *db, const char *command, int num, int vsiz,
+			int batch, unsigned int seed)
+{
+	die("rangeout_test is not implemented");
+}
+
 static void range_test(void *db, const char *command, int num, int vsiz,
 			int batch, unsigned int seed)
 {
@@ -447,7 +453,7 @@ static void range_test(void *db, const char *command, int num, int vsiz,
 		free(data.data);
 		flags = DB_NEXT;
 	}
-	if (i != num)
+	if (debug && i != num)
 		die("Unexpected record num");
 
 	cursor->close(cursor);
@@ -463,8 +469,10 @@ struct benchmark_config config = {
 	.num = 5000000,
 	.vsiz = 100,
 	.batch = 1000,
-	.thnum = 1,
+	.producer_thnum = 1,
+	.consumer_thnum = 1,
 	.debug = false,
+	.verbose = 1,
 	.share = 1,
 	.ops = {
 		.open_db = open_db,
@@ -475,6 +483,7 @@ struct benchmark_config config = {
 		.fwmkeys_test = fwmkeys_test,
 		.getlist_test = getlist_test,
 		.range_test = range_test,
+		.rangeout_test = rangeout_test,
 		.outlist_test = outlist_test,
 	},
 };
