@@ -56,13 +56,11 @@ static void get_test(void *db, int num, int vsiz, unsigned int seed)
 
 	for (i = 0; i < num; i++) {
 		string key(keygen_next_key(&keygen));
-		string *value;
+		string value;
 
-		value = rdb->get(key);
-		if (debug && vsiz != value->size())
-			die("Unexpected value size: %d", value->size());
-
-		delete value;
+		rdb->get(key, &value);
+		if (debug && vsiz != value.size())
+			die("Unexpected value size: %d", value.size());
 	}
 }
 
@@ -79,7 +77,7 @@ static void putlist_bin_test(void *db, const char *command, int num, int vsiz,
 
 	for (i = 0; i < num; i++) {
 		string key(keygen_next_key(&keygen));
-		RemoteDB::BulkRecord rec = { 0, key, value, INT64_MAX };
+		RemoteDB::BulkRecord rec = { 0, key, value, kc::INT64MAX };
 
 		bulkrecs.push_back(rec);
 
@@ -279,7 +277,7 @@ static void range_test(void *db, const char *command, int num, int vsiz,
 	RemoteDB *rdb = (RemoteDB *)db;
 	struct keygen keygen;
 	char prefix[KEYGEN_PREFIX_SIZE + 1];
-	pair<string, string> *rec;
+	string key, value;
 	int nrecs = 0;
 
 	keygen_init(&keygen, seed);
@@ -287,18 +285,16 @@ static void range_test(void *db, const char *command, int num, int vsiz,
 	RemoteDB::Cursor *cur = rdb->cursor();
 	cur->jump(prefix, strlen(prefix));
 
-	while ((rec = cur->get_pair(NULL, true)) != NULL) {
-		if (strncmp(rec->first.data(), prefix, strlen(prefix))) {
-			delete rec;
+	while (cur->get(&key, &value)) {
+		if (strncmp(key.data(), prefix, strlen(prefix))) {
 			break;
 		}
-		if (debug && vsiz != rec->second.size())
-			die("Unexpected value size: %d", rec->second.size());
+		if (debug && vsiz != value.size())
+			die("Unexpected value size: %d", value.size());
 		if (debug && strncmp(keygen_next_key(&keygen),
-				rec->first.data(), rec->first.size()))
+				key.data(), key.size()))
 			die("Unexpected key");
 		nrecs++;
-		delete rec;
 	}
 	if (debug && num != nrecs)
 		die("Unexpected record num: %d", nrecs);
@@ -374,7 +370,6 @@ int main(int argc, char **argv)
 	config.consumer_thnum = 1;
 	config.debug = false;
 	config.verbose = 1;
-	config.share = 0;
 	config.ops.open_db = open_db;
 	config.ops.close_db = close_db;
 	config.ops.put_test = put_test;

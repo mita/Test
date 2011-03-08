@@ -100,19 +100,26 @@ static void exit_env(DB_ENV *env)
 	env->close(env, 0);
 }
 
+/* Shared by all benchmark threads */
+static struct BDB *bdb;
+
 static void *open_db(struct benchmark_config *config)
 {
 	int ret;
-	struct BDB *bdb = xmalloc(sizeof(*bdb));
 	DB *db;
 	DB_ENV *dbenv;
+
+	if (bdb)
+		return bdb;
+
+	bdb = xmalloc(sizeof(*bdb));
 
 	dbenv = init_env(config->path);
 
 	ret = db_create(&db, dbenv, 0);
 	if (ret) {
 		dbenv->err(dbenv, ret, "db_create");
-		return NULL;
+		exit(1);
 	}
 	db->set_errfile(db, stderr);
 
@@ -123,7 +130,7 @@ static void *open_db(struct benchmark_config *config)
 	ret = db->open(db, NULL, "data.db", NULL, DB_BTREE, DB_CREATE, 0664);
 	if (ret) {
 		db->err(db, ret, "open");
-		return NULL;
+		exit(1);
 	}
 
 	bdb->dbenv = dbenv;
@@ -142,8 +149,10 @@ static void *open_db(struct benchmark_config *config)
 
 static void close_db(void *db)
 {
-	struct BDB *bdb = db;
 	DB_ENV *dbenv = bdb->dbenv;
+
+	if (bdb != db)
+		return;
 
 	pthread_mutex_lock(&bdb->stop_mutex);
 	bdb->stop = true;
@@ -158,6 +167,7 @@ static void close_db(void *db)
 	exit_env(dbenv);
 
 	free(bdb);
+	bdb = NULL;
 }
 
 #define KSIZ KEYGEN_KEY_SIZE
@@ -473,7 +483,6 @@ struct benchmark_config config = {
 	.consumer_thnum = 1,
 	.debug = false,
 	.verbose = 1,
-	.share = 1,
 	.ops = {
 		.open_db = open_db,
 		.close_db = close_db,
@@ -492,8 +501,6 @@ int main(int argc, char **argv)
 {
 	parse_options(&config, argc, argv);
 
-	if (config.share != 1)
-		die("Invalid -share option");
 	debug = config.debug;
 
 	benchmark(&config);

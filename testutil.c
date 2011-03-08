@@ -134,8 +134,6 @@ static void fixup_config(struct benchmark_config *config)
 		config->producer_thnum = 1;
 	if (config->consumer_thnum < 1)
 		config->consumer_thnum = 1;
-	if (config->share < 1)
-		config->share = INT_MAX;
 	if (config->num_works < 1)
 		config->num_works = config->producer_thnum;
 }
@@ -181,8 +179,6 @@ void parse_options(struct benchmark_config *config, int argc, char **argv)
 			config->debug = true;
 		} else if (!strcmp(argv[i], "-verbose")) {
 			config->verbose = atoi(argv[++i]);
-		} else if (!strcmp(argv[i], "-share")) {
-			config->share = atoi(argv[++i]);
 		} else {
 			die("Invalid command option: %s", argv[i]);
 		}
@@ -281,6 +277,11 @@ struct worker_info {
 	struct benchmark_config *config;
 };
 
+static int strstartswith(const char *str, const char *prefix)
+{
+	return !strncmp(str, prefix, strlen(prefix));
+}
+
 static void handle_work(struct worker_info *data, struct work *work)
 {
 	const char *command = data->command;
@@ -293,38 +294,38 @@ static void handle_work(struct worker_info *data, struct work *work)
 
 	start = stopwatch_start();
 
-	if (!strcmp(command, "putlist") || !strcmp(command, "putlist2")) {
+	if (strstartswith(command, "putlist")) {
 		bops->putlist_test(data->db, command, config->num,
 				config->vsiz, config->batch, work->seed);
 	} else if (!strcmp(command, "fwmkeys")) {
 		bops->fwmkeys_test(data->db, config->num, work->seed);
-	} else if (!strcmp(command, "range") || !strcmp(command, "range2")) {
+	} else if (!strcmp(command, "range") || !strcmp(command, "range_atomic")) {
 		bops->range_test(data->db, command, config->num,
 				config->vsiz, config->batch, work->seed);
-	} else if (!strcmp(command, "rangeout")) {
+	} else if (!strcmp(command, "rangeout_atomic")) {
 		bops->rangeout_test(data->db, command, config->num,
 				config->vsiz, config->batch, work->seed);
-	} else if (!strcmp(command, "getlist") || !strcmp(command, "getlist2")) {
+	} else if (strstartswith(command, "getlist")) {
 		bops->getlist_test(data->db, command, config->num,
 				config->vsiz, config->batch, work->seed);
 	} else if (!strcmp(command, "fwmkeys-getlist")) {
 		bops->fwmkeys_test(data->db, config->num, work->seed);
 		bops->getlist_test(data->db, "getlist", config->num,
 				config->vsiz, config->batch, work->seed);
-	} else if (!strcmp(command, "fwmkeys-getlist2")) {
+	} else if (!strcmp(command, "fwmkeys-getlist_atomic")) {
 		bops->fwmkeys_test(data->db, config->num, work->seed);
-		bops->getlist_test(data->db, "getlist2", config->num,
+		bops->getlist_test(data->db, "getlist_atomic", config->num,
 				config->vsiz, config->batch, work->seed);
-	} else if (!strcmp(command, "outlist") || !strcmp(command, "outlist2")) {
+	} else if (strstartswith(command, "outlist")) {
 		bops->outlist_test(data->db, command, config->num,
 					config->batch, work->seed);
 	} else if (!strcmp(command, "fwmkeys-outlist")) {
 		bops->fwmkeys_test(data->db, config->num, work->seed);
 		bops->outlist_test(data->db, "outlist", config->num,
 					config->batch, work->seed);
-	} else if (!strcmp(command, "fwmkeys-outlist2")) {
+	} else if (!strcmp(command, "fwmkeys-outlist_atomic")) {
 		bops->fwmkeys_test(data->db, config->num, work->seed);
-		bops->outlist_test(data->db, "outlist2", config->num,
+		bops->outlist_test(data->db, "outlist_atomic", config->num,
 					config->batch, work->seed);
 	} else if (!strcmp(command, "put")) {
 		bops->put_test(data->db, config->num, config->vsiz, work->seed);
@@ -363,11 +364,7 @@ static struct worker_info *create_workers(struct benchmark_config *config,
 	int i;
 
 	for (i = 0; i < thnum; i++) {
-		if ((i % config->share) == i)
-			data[i].db = config->ops.open_db(config);
-		else
-			data[i].db = data[i % config->share].db;
-
+		data[i].db = config->ops.open_db(config);
 		data[i].config = config;
 		data[i].command = command;
 		data[i].in_queue = in_queue;
@@ -393,8 +390,7 @@ static void destroy_workers(struct worker_info *data, int thnum)
 	int i;
 
 	for (i = 0; i < thnum; i++) {
-		if ((i % config->share) == i)
-			config->ops.close_db(data[i].db);
+		config->ops.close_db(data[i].db);
 	}
 	free(data);
 }
@@ -478,7 +474,6 @@ void benchmark(struct benchmark_config *config)
 	consumers = create_workers(config, config->consumer_thnum,
 				config->consumer, &queue_to_consumer,
 				&trash_queue);
-
 	start = stopwatch_start();
 
 	for (i = 0; i < config->num_works; i++) {

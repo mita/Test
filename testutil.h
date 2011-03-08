@@ -66,7 +66,6 @@ struct benchmark_config {
 	int num_works;
 	bool debug;
 	int verbose;
-	int share;
 	struct benchmark_operations ops;
 };
 

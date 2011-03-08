@@ -5,9 +5,13 @@
 
 static bool debug = false;
 
+/* Shared by all benchmark threads */
+static TCADB *adb;
+
 static void *open_db(struct benchmark_config *config)
 {
-	TCADB *adb;
+	if (adb)
+		return adb;
 
 	adb = tcadbnew();
 
@@ -19,12 +23,14 @@ static void *open_db(struct benchmark_config *config)
 
 static void close_db(void *db)
 {
-	TCADB *adb = db;
+	if (adb != db)
+		return;
 
-	if (!tcadbclose(adb)){
+	if (!tcadbclose(adb))
 		die("close error: %s", tcadbpath(adb));
-	}
+
 	tcadbdel(adb);
+	adb = NULL;
 }
 
 static void put_test(void *db, int num, int vsiz, unsigned int seed)
@@ -203,7 +209,7 @@ static void getlist_test(void *db, const char *command, int num, int vsiz,
 	tclistdel(list);
 }
 
-static void range1_test(void *db, int num, int vsiz, int batch,
+static void range_nonatomic_test(void *db, int num, int vsiz, int batch,
 			unsigned int seed)
 {
 	TCADB *adb = db;
@@ -233,19 +239,19 @@ static void range1_test(void *db, int num, int vsiz, int batch,
 		if (!num_recs)
 			break;
 
-		check_records(recs, &keygen, vsiz, num_recs);
+		check_records(recs, &keygen, vsiz, num < batch ? num : batch);
 		/* overwrite start_key by the last one + '\0' */
 		tclistover(args, 0, tclistval2(recs, 2 * (num_recs - 1)), KEYGEN_KEY_SIZE + 1);
 		tclistdel(recs);
 		num -= num_recs;
 	}
 	if (debug && num)
-		die("Unexpected record num");
+		die("Unexpected record num: %d", num);
 
 	tclistdel(args);
 }
 
-static void range2_test(void *db, int num, int vsiz, int batch,
+static void range_atomic_test(void *db, int num, int vsiz, int batch,
 			unsigned int seed)
 {
 	TCADB *adb = db;
@@ -273,18 +279,18 @@ static void range2_test(void *db, int num, int vsiz, int batch,
 		TCLIST *recs;
 		int num_recs;
 
-		recs = do_tcadbmisc(adb, "range2", args);
+		recs = do_tcadbmisc(adb, "range_atomic", args);
 		num_recs = tclistnum(recs) / 2;
 		if (!num_recs)
 			break;
 
-		check_records(recs, &keygen, vsiz, num_recs);
+		check_records(recs, &keygen, vsiz, num < batch ? num : batch);
 		tclistover2(args, 0, tclistval2(recs, 2 * (num_recs - 1)));
 		tclistdel(recs);
 		num -= num_recs;
 	}
 	if (debug && num)
-		die("Unexpected record num");
+		die("Unexpected record num: %d", num);
 
 	tclistdel(args);
 }
@@ -293,9 +299,9 @@ static void range_test(void *db, const char *command, int num, int vsiz,
 			int batch, unsigned int seed)
 {
 	if (!strcmp(command, "range"))
-		return range1_test(db, num, vsiz, batch, seed);
-	else if (!strcmp(command, "range2"))
-		return range2_test(db, num, vsiz, batch, seed);
+		return range_nonatomic_test(db, num, vsiz, batch, seed);
+	else if (!strcmp(command, "range_atomic"))
+		return range_atomic_test(db, num, vsiz, batch, seed);
 
 	die("invalid range command");
 }
@@ -381,7 +387,6 @@ struct benchmark_config config = {
 	.consumer_thnum = 1,
 	.debug = false,
 	.verbose = 1,
-	.share = 1,
 	.ops = {
 		.open_db = open_db,
 		.close_db = close_db,
@@ -400,8 +405,6 @@ int main(int argc, char **argv)
 {
 	parse_options(&config, argc, argv);
 	debug = config.debug;
-	if (config.share != 1)
-		die("Invalid -share option");
 	benchmark(&config);
 
 	return 0;
